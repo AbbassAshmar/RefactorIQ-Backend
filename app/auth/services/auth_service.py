@@ -19,6 +19,8 @@ from app.schemas.auth import TokenPayload
 from app.schemas.user import UserCreate, UserInternal, UserResponse
 from app.users.repositories.repository import UserRepository
 
+import logging
+logger = logging.getLogger(__name__)
 
 class AuthService:
     def __init__(
@@ -69,16 +71,19 @@ class AuthService:
             github_login: str = github_user_data.get("login", "")
             github_name: str = github_user_data.get("name") or github_login
             github_email: str | None = github_user_data.get("email")
-
+            print(f"GitHub user data: {github_user_data}")
             user = self._repo.get_by_github_id(github_id)
-
+            print(f"Existing user with GitHub ID {github_id}: {user}")
             if user:
+                # log info 
+                
+                logger.info(f"Updating existing GitHub user: {github_login}")
                 self._repo.update(
                     user.id,
                     {
                         "github_access_token": encrypted_github_token,
                         "github_username": github_login,
-                        "full_name": github_name,
+                        "username": github_name,
                     },
                 )
                 user = self._repo.get_by_id(user.id)
@@ -97,9 +102,11 @@ class AuthService:
                     )
                     user = self._repo.get_by_id(existing_by_email.id)
                 else:
+                    logger.info(f"Creating new user from GitHub login: {github_login}")
+
                     user_data = UserCreate(
                         email=email,
-                        full_name=github_name,
+                        username=github_name,
                         role=UserRole.CLIENT,
                         github_username=github_login,
                         github_id=github_id,
@@ -115,8 +122,10 @@ class AuthService:
             token = self._jwt_service.create_access_token(user.id, user.role.value)
             return token, self._to_response(user)
         except DuplicateRecordException as exc:
+            logger.error(f"GitHub account conflict for GitHub ID {github_user_data.get('id')}")
             raise AuthenticationError("GitHub account conflict") from exc
         except (RecordNotFoundException, DatabaseOperationException) as exc:
+            logger.error(f"GitHub authentication failed for GitHub ID {github_user_data.get('id')}: {exc}")
             raise AuthenticationError("GitHub authentication failed") from exc
 
     # ── Helpers ──────────────────────────────────────────────

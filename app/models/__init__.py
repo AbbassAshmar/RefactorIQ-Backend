@@ -1,9 +1,9 @@
 from app.models.base import Base
-from app.models.auth import Permission, RolePermission, User
+from app.models.auth import Permission, Role, User
 
 __all__ = [
     "Base",
     "Permission",
-    "RolePermission",
+    "Role",
     "User",
 ]

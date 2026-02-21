@@ -16,6 +16,9 @@ from app.models import User
 from app.schemas.user import UserCreate, UserInternal
 
 
+import logging
+logger = logging.getLogger(__name__)
+
 class UserRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
@@ -38,6 +41,7 @@ class UserRepository:
             user = self._db.execute(stmt).scalar_one_or_none()
             return UserInternal.model_validate(user) if user else None
         except SQLAlchemyError as exc:
+            logger.error(f"Failed to load user by email {email}: {exc}")
             raise DatabaseOperationException(
                 "Failed to load user by email",
                 details={"email": email},
@@ -49,6 +53,7 @@ class UserRepository:
             user = self._db.execute(stmt).scalar_one_or_none()
             return UserInternal.model_validate(user) if user else None
         except SQLAlchemyError as exc:
+            logger.error(f"Failed to load user by GitHub id {github_id}: {exc}")
             raise DatabaseOperationException(
                 "Failed to load user by GitHub id",
                 details={"github_id": github_id},

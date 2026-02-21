@@ -24,6 +24,9 @@ from app.schemas.auth import TokenPayload
 from app.schemas.user import UserResponse
 from app.users.services.service import UserService
 from app.utils.response import ApiResponse
+from fastapi.responses import RedirectResponse
+
+FRONTEND_URL = "http://localhost:3000"
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -90,15 +93,15 @@ async def github_callback(
     jwt_token, user = auth_service.authenticate_github_user(
         github_user_data, encrypted
     )
-    _set_auth_cookie(response, jwt_token)
-    return ApiResponse.success(
-        data=AuthResponse(
-            message="GitHub authentication successful",
-            user_id=str(user.id),
-            role=user.role.name,
-        ).model_dump()
+
+    redirect_response = RedirectResponse(
+        url=f"{FRONTEND_URL}/dashboard",
+        status_code=302,
     )
 
+    _set_auth_cookie(redirect_response, jwt_token)
+
+    return redirect_response
 
 # ── Logout / Me ──────────────────────────────────────────────
 

@@ -13,17 +13,24 @@ from app.users.routes import router as users_router
 from app.auth.routes import router as auth_router
 from app.utils.response import ApiResponse
 
-logging.basicConfig(
-    level=logging.INFO if settings.ENVIRONMENT == "production" else logging.DEBUG,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-)
-logger = logging.getLogger(__name__)
+from app.core.database import engine 
+from app.models import Base
 
+from app.core.logger import configure_logging
+import logging
+
+configure_logging()
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting %s v%s", settings.APP_NAME, settings.APP_VERSION)
+
+    # Initialization tasks
+    Base.metadata.create_all(bind=engine)  
+    
     yield
+
     logger.info("Shutting down %s", settings.APP_NAME)
 
 
