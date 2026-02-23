@@ -1,36 +1,27 @@
-"""Authentication routes (controllers).
-
-* ``POST /auth/admin/login``   – admin email + password login
-* ``GET  /auth/github/authorize`` – return GitHub OAuth URL
-* ``GET  /auth/github/callback``  – GitHub OAuth callback
-* ``POST /auth/logout``        – clear auth cookie
-* ``GET  /auth/me``            – return current user
-"""
-
 from __future__ import annotations
 
 import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, Response
+from fastapi.responses import RedirectResponse
 
-from app.auth.services.oauth_service import OAuthService
-from app.auth.utils import COOKIE_NAME, get_current_payload
+from app.core.route_dependencies import get_current_payload
 from app.auth.services.auth_service import AuthService
+from app.auth.services.oauth_service import OAuthService
+from app.auth.utils import COOKIE_NAME
 from app.core.security import encrypt_token
 from app.dependencies import get_auth_service, get_oauth_service, get_user_service
-from app.schemas.auth import AdminLoginRequest, AuthResponse
-from app.schemas.auth import TokenPayload
+from app.schemas.auth import AdminLoginRequest, AuthResponse, TokenPayload
 from app.schemas.user import UserResponse
 from app.users.services.service import UserService
 from app.utils.response import ApiResponse
-from fastapi.responses import RedirectResponse
+
 
 FRONTEND_URL = "http://localhost:3000"
-
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-COOKIE_MAX_AGE = 30 * 24 * 60 * 60  # 30 days
+COOKIE_MAX_AGE = 30 * 24 * 60 * 60
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
@@ -47,7 +38,6 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 
 # ── Admin login ──────────────────────────────────────────────
 
-
 @router.post("/admin/login")
 def admin_login(
     body: AdminLoginRequest,
@@ -56,6 +46,7 @@ def admin_login(
 ):
     token, user = auth_service.authenticate_admin(body.email, body.password)
     _set_auth_cookie(response, token)
+
     return ApiResponse.success(
         data=AuthResponse(
             message="Login successful",
@@ -67,12 +58,10 @@ def admin_login(
 
 # ── GitHub OAuth ─────────────────────────────────────────────
 
-
 @router.get("/github/authorize")
 def github_authorize(
     oauth_service: OAuthService = Depends(get_oauth_service),
 ):
-    """Return the GitHub authorisation URL the frontend should redirect to."""
     state = secrets.token_urlsafe(32)
     url = oauth_service.get_github_authorize_url(state=state)
     return ApiResponse.success(data={"authorize_url": url, "state": state})
@@ -100,11 +89,10 @@ async def github_callback(
     )
 
     _set_auth_cookie(redirect_response, jwt_token)
-
     return redirect_response
 
-# ── Logout / Me ──────────────────────────────────────────────
 
+# ── Logout / Me ──────────────────────────────────────────────
 
 @router.post("/logout")
 def logout(
@@ -123,4 +111,6 @@ def get_me(
     user_service: UserService = Depends(get_user_service),
 ):
     current_user = user_service.get_user(uuid.UUID(payload.sub))
-    return ApiResponse.success(data=UserResponse.model_validate(current_user).model_dump())
+    return ApiResponse.success(
+        data={ "user": UserResponse.model_validate(current_user).model_dump() }
+    )

@@ -7,6 +7,7 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
+from starlette.routing import Match
 
 from app.auth.services.jwt_service import JWTService
 from app.auth.utils import COOKIE_NAME
@@ -40,10 +41,23 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 class AuthContextMiddleware(BaseHTTPMiddleware):
     """Extract and validate JWT from cookie then attach payload to request state."""
 
+    @staticmethod
+    def _is_auth_required(request: Request) -> bool:
+        for route in request.app.router.routes:
+            match, child_scope = route.matches(request.scope)
+            if match is Match.FULL:
+                endpoint = child_scope.get("endpoint")
+                return bool(getattr(endpoint, "requires_auth_context", False))
+        return False
+
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
         request.state.auth_payload = None
+
+        if not self._is_auth_required(request):
+            return await call_next(request)
+
         token = request.cookies.get(COOKIE_NAME)
 
         if token:

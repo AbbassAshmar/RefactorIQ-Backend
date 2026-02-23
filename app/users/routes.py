@@ -14,13 +14,14 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 
-from app.auth.utils import get_current_payload, require_permission
 from app.core.enums import UserRole
 from app.dependencies import get_user_service
 from app.schemas.auth import TokenPayload
 from app.schemas.user import UserUpdate
 from app.users.services.service import UserService
 from app.utils.response import ApiResponse
+from app.core.route_dependencies import require_permissions
+
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -31,7 +32,7 @@ def list_users(
     size: int = Query(20, ge=1, le=100),
     role: UserRole | None = None,
     user_service: UserService = Depends(get_user_service),
-    payload: TokenPayload = Depends(require_permission("manage-users")),
+    payload: TokenPayload = Depends(require_permissions("manage-users")),
 ):
     user_service.get_user(uuid.UUID(payload.sub))
     data = user_service.list_users(page=page, size=size, role=role)
@@ -42,7 +43,7 @@ def list_users(
 def get_user(
     user_id: uuid.UUID,
     user_service: UserService = Depends(get_user_service),
-    payload: TokenPayload = Depends(require_permission("manage-users")),
+    payload: TokenPayload = Depends(require_permissions(["manage-users"])),
 ):
     user_service.get_user(uuid.UUID(payload.sub))
     data = user_service.get_user(user_id)
@@ -54,7 +55,7 @@ def update_user(
     user_id: uuid.UUID,
     body: UserUpdate,
     user_service: UserService = Depends(get_user_service),
-    payload: TokenPayload = Depends(require_permission("manage-users")),
+    payload: TokenPayload = Depends(require_permissions(["manage-users"])),
 ):
     user_service.get_user(uuid.UUID(payload.sub))
     data = user_service.update_user(user_id, body)
@@ -65,7 +66,7 @@ def update_user(
 def delete_user(
     user_id: uuid.UUID,
     user_service: UserService = Depends(get_user_service),
-    payload: TokenPayload = Depends(require_permission("manage-users")),
+    payload: TokenPayload = Depends(require_permissions(["manage-users"])),
 ):
     user_service.get_user(uuid.UUID(payload.sub))
     user_service.delete_user(user_id)
