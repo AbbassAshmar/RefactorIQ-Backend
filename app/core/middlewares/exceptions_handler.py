@@ -14,6 +14,7 @@ from app.core.exceptions.domain_exceptions import (
     ValidationError,
 )
 from app.utils.response import ApiResponse
+from app.core.exceptions.http_exceptions import HttpException
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,7 @@ EXCEPTION_MAPPINGS = {
     ExternalServiceError: (status.HTTP_502_BAD_GATEWAY, "EXTERNAL_SERVICE_ERROR"),
 }
 
-
-async def domain_exception_handler(
-    request: Request, exc: DomainException
-) -> JSONResponse:
+async def domain_exception_handler(request: Request, exc: DomainException) -> JSONResponse:
     exc_type = type(exc)
     if exc_type in EXCEPTION_MAPPINGS:
         status_code, error_code = EXCEPTION_MAPPINGS[exc_type]
@@ -50,9 +48,16 @@ async def domain_exception_handler(
     )
 
 
-async def validation_exception_handler(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
+async def http_exception_handler(request: Request, exc: HttpException) -> JSONResponse:
+    return ApiResponse.error(
+        code=str(exc.status_code), 
+        message=exc.message,
+        status_code=exc.status_code,
+        details=exc.details,
+    )
+
+
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     field_errors: dict[str, list[str]] = {}
     for error in exc.errors():
         field = ".".join(str(x) for x in error["loc"][1:])
@@ -66,9 +71,7 @@ async def validation_exception_handler(
     )
 
 
-async def generic_exception_handler(
-    request: Request, exc: Exception
-) -> JSONResponse:
+async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.error("Unhandled exception: %s", exc, exc_info=True)
     return ApiResponse.error(
         code="INTERNAL_ERROR",
@@ -79,5 +82,6 @@ async def generic_exception_handler(
 
 def register_exception_handlers(app) -> None:
     app.add_exception_handler(DomainException, domain_exception_handler)
+    app.add_exception_handler(HttpException, http_exception_handler)  
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(Exception, generic_exception_handler)

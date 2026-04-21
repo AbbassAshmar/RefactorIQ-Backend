@@ -14,6 +14,7 @@ from app.auth.services.auth_service import AuthService
 from app.auth.services.jwt_service import JWTService
 from app.auth.services.oauth_service import OAuthService
 from app.core.database import get_db
+from app.users.repositories.role_repository import RoleRepository
 from app.users.repositories.repository import UserRepository
 from app.users.services.service import UserService
 
@@ -28,14 +29,25 @@ def build_user_repository(db: Session) -> UserRepository:
     return UserRepository(db)
 
 
+def get_role_repository(
+    db: Session = Depends(get_db),
+) -> RoleRepository:
+    return RoleRepository(db)
+
+
+def build_role_repository(db: Session) -> RoleRepository:
+    return RoleRepository(db)
+
+
 def get_user_service(
     repo: UserRepository = Depends(get_user_repository),
+    role_repo: RoleRepository = Depends(get_role_repository),
 ) -> UserService:
-    return UserService(repo)
+    return UserService(repo, role_repo)
 
 
-def build_user_service(repo: UserRepository) -> UserService:
-    return UserService(repo)
+def build_user_service(repo: UserRepository, role_repo: RoleRepository) -> UserService:
+    return UserService(repo, role_repo)
 
 
 def get_jwt_service() -> JWTService:
@@ -47,11 +59,16 @@ def get_oauth_service() -> OAuthService:
 
 
 def get_auth_service(
-    repo: UserRepository = Depends(get_user_repository),
+    user_repo: UserRepository = Depends(get_user_repository),
+    role_repo: RoleRepository = Depends(get_role_repository),
     jwt_service: JWTService = Depends(get_jwt_service),
 ) -> AuthService:
-    return AuthService(repo, jwt_service)
+    return AuthService(user_repo, role_repo, jwt_service)
 
 
-def build_auth_service(repo: UserRepository, jwt_service: JWTService) -> AuthService:
-    return AuthService(repo, jwt_service)
+def build_auth_service(
+    user_repo: UserRepository,
+    role_repo: RoleRepository,
+    jwt_service: JWTService,
+) -> AuthService:
+    return AuthService(user_repo, role_repo, jwt_service)

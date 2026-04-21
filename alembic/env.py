@@ -17,7 +17,7 @@ from app.models import Base  # noqa: F401 – side-effect import
 config = context.config
 
 # Override the INI-file URL with the real one from .env
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", settings.APP_DATABASE_URL)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

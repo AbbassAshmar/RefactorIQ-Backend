@@ -1,0 +1,71 @@
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: refactorIQ-Dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  fastapi:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: fastapi
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+      - postgres
+    env_file:
+      - ../.env.development
+    volumes:
+      - ..:/backend
+    restart: unless-stopped
+
+  celery_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: celery_worker
+    command: celery -A app.core.celery_app.celery worker --loglevel=info 
+    depends_on:
+      - redis
+      - postgres
+    env_file:
+      - ../.env.development
+    volumes:
+      - ..:/backend
+    restart: unless-stopped
+
+  kanchi:
+    image: getkanchi/kanchi:latest
+    container_name: kanchi
+    ports:
+      - "3000:3000"
+      - "8765:8765"
+    depends_on:
+      - redis
+    env_file:
+      - ../.env.development
+    volumes:
+      - kanchi-data:/data
+    restart: unless-stopped
+
+volumes:
+  kanchi-data:
+  postgres-data:

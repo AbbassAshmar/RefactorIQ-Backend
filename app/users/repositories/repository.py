@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.enums import UserRole
 from app.core.exceptions.repository_exceptions import (
@@ -12,23 +12,57 @@ from app.core.exceptions.repository_exceptions import (
     DuplicateRecordException,
     RecordNotFoundException,
 )
-from app.models import User
+from app.models import Role, User
 from app.schemas.user import UserCreate, UserInternal
 
 
 import logging
 logger = logging.getLogger(__name__)
 
+
 class UserRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
 
+    @staticmethod
+    def _to_internal(user: User) -> UserInternal:
+        role_enum: UserRole | None = None
+        role_name = user.role.name if user.role else None
+
+        if role_name:
+            try:
+                role_enum = UserRole(role_name)
+            except ValueError:
+                try:
+                    role_enum = UserRole(role_name.lower())
+                except ValueError:
+                    logger.warning(
+                        "User %s has unknown role name '%s'",
+                        user.id,
+                        role_name,
+                    )
+
+        return UserInternal(
+            id=user.id,
+            email=user.email,
+            username=user.username,
+            password=user.password,
+            role_id=user.role_id,
+            role=role_enum,
+            github_access_token=user.github_access_token,
+            github_username=user.github_username,
+            github_id=user.github_id,
+            is_active=user.is_active,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+        )
+
 
     def get_by_id(self, user_id: uuid.UUID) -> UserInternal | None:
         try:
-            stmt = select(User).where(User.id == user_id)
+            stmt = select(User).options(joinedload(User.role)).where(User.id == user_id)
             user = self._db.execute(stmt).scalar_one_or_none()
-            return UserInternal.model_validate(user) if user else None
+            return self._to_internal(user) if user else None
         except SQLAlchemyError as exc:
             raise DatabaseOperationException(
                 "Failed to load user by id",
@@ -37,9 +71,9 @@ class UserRepository:
 
     def get_by_email(self, email: str) -> UserInternal | None:
         try:
-            stmt = select(User).where(User.email == email)
+            stmt = select(User).options(joinedload(User.role)).where(User.email == email)
             user = self._db.execute(stmt).scalar_one_or_none()
-            return UserInternal.model_validate(user) if user else None
+            return self._to_internal(user) if user else None
         except SQLAlchemyError as exc:
             logger.error(f"Failed to load user by email {email}: {exc}")
             raise DatabaseOperationException(
@@ -49,9 +83,13 @@ class UserRepository:
 
     def get_by_github_id(self, github_id: int) -> UserInternal | None:
         try:
-            stmt = select(User).where(User.github_id == github_id)
+            stmt = (
+                select(User)
+                .options(joinedload(User.role))
+                .where(User.github_id == github_id)
+            )
             user = self._db.execute(stmt).scalar_one_or_none()
-            return UserInternal.model_validate(user) if user else None
+            return self._to_internal(user) if user else None
         except SQLAlchemyError as exc:
             logger.error(f"Failed to load user by GitHub id {github_id}: {exc}")
             raise DatabaseOperationException(
@@ -65,12 +103,13 @@ class UserRepository:
         data: UserCreate,
         *,
         hashed_password: str | None = None,
+        role_id: uuid.UUID | None = None,
         github_access_token: str | None = None,
     ) -> UserInternal:
         user = User(
             email=data.email,
             username=data.username,
-            role=data.role,
+            role_id=role_id if role_id is not None else data.role_id,
             password=hashed_password,
             github_username=data.github_username,
             github_id=data.github_id,
@@ -80,7 +119,13 @@ class UserRepository:
             self._db.add(user)
             self._db.commit()
             self._db.refresh(user)
-            return UserInternal.model_validate(user)
+            created = self.get_by_id(user.id)
+            if not created:
+                raise DatabaseOperationException(
+                    "User created but could not be reloaded",
+                    details={"user_id": str(user.id)},
+                )
+            return created
         except IntegrityError as exc:
             self._db.rollback()
             raise DuplicateRecordException(
@@ -102,7 +147,7 @@ class UserRepository:
         hashing / encryption).
         """
         try:
-            stmt = select(User).where(User.id == user_id)
+            stmt = select(User).options(joinedload(User.role)).where(User.id == user_id)
             user = self._db.execute(stmt).scalar_one_or_none()
             if not user:
                 raise RecordNotFoundException(
@@ -115,7 +160,13 @@ class UserRepository:
 
             self._db.commit()
             self._db.refresh(user)
-            return UserInternal.model_validate(user)
+            updated = self.get_by_id(user.id)
+            if not updated:
+                raise DatabaseOperationException(
+                    "User updated but could not be reloaded",
+                    details={"user_id": str(user.id)},
+                )
+            return updated
         except RecordNotFoundException:
             raise
         except IntegrityError as exc:
@@ -160,12 +211,14 @@ class UserRepository:
     ) -> tuple[list[UserInternal], int]:
         """Return a page of users and the total count."""
         try:
-            base = select(User)
+            base = select(User).options(joinedload(User.role))
             count_stmt = select(func.count()).select_from(User)
 
             if role is not None:
-                base = base.where(User.role == role)
-                count_stmt = count_stmt.where(User.role == role)
+                base = base.join(Role, User.role_id == Role.id).where(Role.name == role.value)
+                count_stmt = count_stmt.join(Role, User.role_id == Role.id).where(
+                    Role.name == role.value
+                )
 
             total: int = self._db.execute(count_stmt).scalar() or 0
 
@@ -175,7 +228,7 @@ class UserRepository:
                 .limit(size)
             )
             rows = self._db.execute(stmt).scalars().all()
-            return [UserInternal.model_validate(u) for u in rows], total
+            return [self._to_internal(u) for u in rows], total
         except SQLAlchemyError as exc:
             raise DatabaseOperationException("Failed to list users") from exc
 

@@ -25,10 +25,7 @@ _ROLE_PERMISSIONS: dict[str, list[str]] = {
     UserRole.CLIENT.value: [],
 }
 
-
-# ──────────────────────────────────────────────────────────────
-# Authentication Dependency
-# ──────────────────────────────────────────────────────────────
+# Authentication
 
 async def get_current_payload(
     request: Request,
@@ -52,10 +49,8 @@ async def get_current_payload(
     return payload
 
 
-# ──────────────────────────────────────────────────────────────
-# Authorization Dependencies
-# ──────────────────────────────────────────────────────────────
 
+# Authorization
 
 def require_permissions(required_permissions: Iterable[str]):
     """

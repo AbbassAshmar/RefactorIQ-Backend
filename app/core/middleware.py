@@ -12,7 +12,11 @@ from starlette.routing import Match
 from app.auth.services.jwt_service import JWTService
 from app.auth.utils import COOKIE_NAME
 from app.core.database import SessionLocal
-from app.dependencies import build_auth_service, build_user_repository
+from app.dependencies import (
+    build_auth_service,
+    build_role_repository,
+    build_user_repository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +68,8 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
             db: Session = SessionLocal()
             try:
                 user_repo = build_user_repository(db)
-                auth_service = build_auth_service(user_repo, JWTService())
+                role_repo = build_role_repository(db)
+                auth_service = build_auth_service(user_repo, role_repo, JWTService())
                 request.state.auth_payload = auth_service.validate_access_token(token)
             finally:
                 db.close()

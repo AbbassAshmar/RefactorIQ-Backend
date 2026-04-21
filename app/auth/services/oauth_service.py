@@ -13,8 +13,6 @@ GITHUB_USER_URL = "https://api.github.com/user"
 
 
 class OAuthService:
-    """GitHub OAuth helpers for authorization URL, token exchange, and profile fetch."""
-
     def get_github_authorize_url(self, state: str | None = None) -> str:
         params: dict[str, str] = {
             "client_id": settings.GITHUB_CLIENT_ID,

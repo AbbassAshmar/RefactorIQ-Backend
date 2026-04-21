@@ -12,11 +12,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.auth.jwt import create_access_token
 from app.core.database import get_db
 from app.core.enums import UserRole
 from app.main import app
-from app.models.base import Base
+from app.models import Base
 
 # ── In-memory SQLite for fast tests ──────────────────────────
 
@@ -58,56 +57,3 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
     app.dependency_overrides.clear()
 
 
-# ── Helper factories ─────────────────────────────────────────
-
-_NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
-
-
-def make_admin_user_dict(**overrides) -> dict:
-    """Return a dict that looks like a ``UserInternal`` dump for an admin."""
-    defaults = {
-        "id": uuid.uuid4(),
-        "email": "admin@example.com",
-        "full_name": "Admin User",
-        "hashed_password": "hashed",
-        "role": UserRole.ADMIN,
-        "github_access_token": None,
-        "github_username": None,
-        "github_id": None,
-        "is_active": True,
-        "created_at": _NOW,
-        "updated_at": _NOW,
-    }
-    defaults.update(overrides)
-    return defaults
-
-
-def make_client_user_dict(**overrides) -> dict:
-    """Return a dict that looks like a ``UserInternal`` dump for a client."""
-    defaults = {
-        "id": uuid.uuid4(),
-        "email": "client@example.com",
-        "full_name": "Client User",
-        "hashed_password": None,
-        "role": UserRole.CLIENT,
-        "github_access_token": "encrypted-token",
-        "github_username": "octocat",
-        "github_id": 12345,
-        "is_active": True,
-        "created_at": _NOW,
-        "updated_at": _NOW,
-    }
-    defaults.update(overrides)
-    return defaults
-
-
-@pytest.fixture()
-def admin_token() -> str:
-    """A valid JWT for an admin user (useful for authenticated requests)."""
-    return create_access_token(uuid.uuid4(), UserRole.ADMIN.value)
-
-
-@pytest.fixture()
-def client_token() -> str:
-    """A valid JWT for a client user."""
-    return create_access_token(uuid.uuid4(), UserRole.CLIENT.value)

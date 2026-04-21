@@ -18,24 +18,34 @@ from app.core.exceptions.repository_exceptions import (
 )
 from app.core.security import hash_password
 from app.schemas.common import PaginatedResponse
-from app.schemas.user import UserCreate, UserResponse, UserUpdate
+from app.schemas.user import UserCreate, UserInternal, UserResponse, UserUpdate
+from app.users.repositories.role_repository import RoleRepository
 from app.users.repositories.repository import UserRepository
 
 
 class UserService:
-    def __init__(self, repository: UserRepository) -> None:
+    def __init__(
+        self,
+        repository: UserRepository,
+        role_repository: RoleRepository,
+    ) -> None:
         self._repo = repository
+        self._role_repo = role_repository
 
     # ── Read ─────────────────────────────────────────────────
 
-    def get_user(self, user_id: uuid.UUID) -> UserResponse:
+    def get_user_internal(self, user_id: uuid.UUID) -> UserInternal:
         try:
             user = self._repo.get_by_id(user_id)
             if not user:
                 raise EntityNotFoundError("user", user_id)
-            return UserResponse.model_validate(user.model_dump())
+            return user
         except DatabaseOperationException as exc:
             raise ConflictError("Unable to retrieve user") from exc
+
+    def get_user(self, user_id: uuid.UUID) -> UserResponse:
+        user = self.get_user_internal(user_id)
+        return UserResponse.model_validate(user.model_dump())
 
     def list_users(
         self,
@@ -54,8 +64,6 @@ class UserService:
         except DatabaseOperationException as exc:
             raise ConflictError("Unable to list users") from exc
 
-    # ── Create ───────────────────────────────────────────────
-
     def create_admin(
         self, email: str, full_name: str, password: str
     ) -> UserResponse:
@@ -64,20 +72,25 @@ class UserService:
             if self._repo.get_by_email(email):
                 raise ConflictError("User with this email already exists")
 
+            admin_role = self._role_repo.get_by_name(UserRole.ADMIN)
+            if not admin_role:
+                raise ConflictError("Default admin role is not configured")
+
             hashed = hash_password(password)
             data = UserCreate(
                 email=email,
-                full_name=full_name,
-                role=UserRole.ADMIN,
+                username=full_name,
             )
-            user = self._repo.create(data, hashed_password=hashed)
+            user = self._repo.create(
+                data,
+                hashed_password=hashed,
+                role_id=admin_role.id,
+            )
             return UserResponse.model_validate(user.model_dump())
         except DuplicateRecordException as exc:
             raise ConflictError("User with this email already exists") from exc
         except DatabaseOperationException as exc:
             raise ConflictError("Unable to create user") from exc
-
-    # ── Update ───────────────────────────────────────────────
 
     def update_user(
         self, user_id: uuid.UUID, update_data: UserUpdate
@@ -87,6 +100,11 @@ class UserService:
                 raise EntityNotFoundError("user", user_id)
 
             fields = update_data.model_dump(exclude_unset=True)
+
+            role_id = fields.get("role_id")
+            if role_id is not None and not self._role_repo.get_by_id(role_id):
+                raise ConflictError("Invalid role_id")
+
             updated = self._repo.update(user_id, fields)
             return UserResponse.model_validate(updated.model_dump())
         except RecordNotFoundException as exc:

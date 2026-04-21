@@ -1,4 +1,3 @@
-"""User Pydantic schemas – request / response contracts and internal DTO."""
 
 import uuid
 from datetime import datetime
@@ -8,14 +7,14 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 from app.core.enums import UserRole
 
 
-# ── Request schemas ──────────────────────────────────────────
+# Request schemas 
 
 
 class UserCreate(BaseModel):
     email: EmailStr
     username: str
     password: str | None = None
-    role: UserRole = UserRole.CLIENT
+    role_id: uuid.UUID | None = None
     github_username: str | None = None
     github_id: int | None = None
 
@@ -24,10 +23,10 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
     username: str | None = None
     is_active: bool | None = None
-    role: UserRole | None = None
+    role_id: uuid.UUID | None = None
 
 
-# ── Response schemas ─────────────────────────────────────────
+# Response schemas 
 
 
 class UserResponse(BaseModel):
@@ -36,7 +35,8 @@ class UserResponse(BaseModel):
     id: uuid.UUID
     email: str
     username: str
-    role: UserRole
+    role_id: uuid.UUID | None = None
+    role: UserRole | None = None
     github_username: str | None = None
     is_active: bool
     created_at: datetime
@@ -45,7 +45,7 @@ class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ── Internal DTO ─────────────────────────────────────────────
+# Internal DTO 
 
 
 class UserInternal(BaseModel):
@@ -57,7 +57,8 @@ class UserInternal(BaseModel):
     email: str
     username: str
     password: str | None = None
-    role: UserRole
+    role_id: uuid.UUID | None = None
+    role: UserRole | None = None
     github_access_token: str | None = None
     github_username: str | None = None
     github_id: int | None = None
