@@ -42,7 +42,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: celery_worker
-    command: celery -A app.core.celery_app.celery worker --loglevel=info 
+    command: celery -A app.core.celery_app.celery worker --loglevel=info -Q default,scans -E
     depends_on:
       - redis
       - postgres

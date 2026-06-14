@@ -10,7 +10,11 @@ from app.core.exceptions.domain_exceptions import (
     ConflictError,
     DomainException,
     EntityNotFoundError,
+    ExternalDependencyError,
     ExternalServiceError,
+    InfrastructureError,
+    PersistenceError,
+    QueueError,
     ValidationError,
 )
 from app.utils.response import ApiResponse
@@ -19,26 +23,34 @@ from app.core.exceptions.http_exceptions import HttpException
 logger = logging.getLogger(__name__)
 
 
-EXCEPTION_MAPPINGS = {
-    ValidationError: (status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR"),
-    AuthenticationError: (status.HTTP_401_UNAUTHORIZED, "UNAUTHORIZED"),
-    AuthorizationError: (status.HTTP_403_FORBIDDEN, "FORBIDDEN"),
-    EntityNotFoundError: (status.HTTP_404_NOT_FOUND, "NOT_FOUND"),
-    ConflictError: (status.HTTP_409_CONFLICT, "CONFLICT"),
-    ExternalServiceError: (status.HTTP_502_BAD_GATEWAY, "EXTERNAL_SERVICE_ERROR"),
-}
+EXCEPTION_MAPPINGS = (
+    (ValidationError, (status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR")),
+    (AuthenticationError, (status.HTTP_401_UNAUTHORIZED, "UNAUTHORIZED")),
+    (AuthorizationError, (status.HTTP_403_FORBIDDEN, "FORBIDDEN")),
+    (EntityNotFoundError, (status.HTTP_404_NOT_FOUND, "NOT_FOUND")),
+    (ConflictError, (status.HTTP_409_CONFLICT, "CONFLICT")),
+    (PersistenceError, (status.HTTP_500_INTERNAL_SERVER_ERROR, "PERSISTENCE_ERROR")),
+    (QueueError, (status.HTTP_503_SERVICE_UNAVAILABLE, "QUEUE_ERROR")),
+    (
+        ExternalDependencyError,
+        (status.HTTP_502_BAD_GATEWAY, "EXTERNAL_DEPENDENCY_ERROR"),
+    ),
+    (InfrastructureError, (status.HTTP_500_INTERNAL_SERVER_ERROR, "INFRASTRUCTURE_ERROR")),
+    (ExternalServiceError, (status.HTTP_502_BAD_GATEWAY, "EXTERNAL_SERVICE_ERROR")),
+)
 
 async def domain_exception_handler(request: Request, exc: DomainException) -> JSONResponse:
-    exc_type = type(exc)
-    if exc_type in EXCEPTION_MAPPINGS:
-        status_code, error_code = EXCEPTION_MAPPINGS[exc_type]
-        message = exc.message
-        details = exc.details
-    else:
-        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        error_code = "INTERNAL_ERROR"
-        message = "An internal server error occurred"
-        details = None
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    error_code = "INTERNAL_ERROR"
+    message = "An internal server error occurred"
+    details = None
+    print(f"Handling DomainException: {exc}")
+    for exception_type, mapping in EXCEPTION_MAPPINGS:
+        if isinstance(exc, exception_type):
+            status_code, error_code = mapping
+            message = exc.message
+            details = exc.details
+            break
 
     return ApiResponse.error(
         code=error_code,

@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import uuid
 
-from app.core.exceptions.domain_exceptions import ConflictError, EntityNotFoundError
+from app.core.exceptions.domain_exceptions import ConflictError, EntityNotFoundError, ExternalDependencyError
 from app.core.security import decrypt_token
 from app.github.services.client_service import GithubClientService
 from app.schemas.github import GithubBranchResponse, GithubRepositoryResponse
 from app.users.services.service import UserService
+
+
+import subprocess
+from pathlib import Path
 
 
 class GithubService:
@@ -97,3 +101,37 @@ class GithubService:
             )
             for branch in branches
         ]
+
+    def clone_repository(
+        self,
+        repo_owner: str,
+        repo_name: str,
+        branch: str,
+        access_token: str,
+        destination: Path,
+    ) -> None:
+        url = f"https://{access_token}@github.com/{repo_owner}/{repo_name}.git"
+        try:
+            subprocess.run(
+                [
+                    "git", "clone",
+                    "--branch", branch,
+                    "--single-branch",
+                    "--depth", "1",
+                    url,
+                    str(destination),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=120,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise ExternalDependencyError(
+                f"Failed to clone {repo_owner}/{repo_name}@{branch}"
+            ) from exc
+        except FileNotFoundError as exc:
+            raise ExternalDependencyError(
+                "Git executable is not available in the runtime environment"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ExternalDependencyError("Clone timed out") from exc

@@ -53,8 +53,24 @@ class ConflictError(DomainException):
     """Operation conflicts with current state of resource(s)."""
 
 
-class ExternalServiceError(DomainException):
-    """A dependent external service failed to fulfill a request."""
+class InfrastructureError(DomainException):
+    """Infrastructure or system boundary failed."""
+
+
+class PersistenceError(InfrastructureError):
+    """Database/persistence failure."""
+
+
+class QueueError(InfrastructureError):
+    """Background queue failed."""
+
+
+class ExternalDependencyError(InfrastructureError):
+    """External API/service failure."""
+
+
+class ExternalServiceError(ExternalDependencyError):
+    """Backward-compatible alias for external dependency failures."""
 
     def __init__(
         self,

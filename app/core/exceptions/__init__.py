@@ -4,7 +4,11 @@ from app.core.exceptions.domain_exceptions import (
 	ConflictError,
 	DomainException,
 	EntityNotFoundError,
+	ExternalDependencyError,
 	ExternalServiceError,
+	InfrastructureError,
+	PersistenceError,
+	QueueError,
 	ValidationError,
 )
 from app.core.exceptions.repository_exceptions import (
@@ -21,6 +25,10 @@ __all__ = [
 	"AuthorizationError",
 	"EntityNotFoundError",
 	"ConflictError",
+	"InfrastructureError",
+	"PersistenceError",
+	"QueueError",
+	"ExternalDependencyError",
 	"ExternalServiceError",
 	"RepositoryException",
 	"RecordNotFoundException",

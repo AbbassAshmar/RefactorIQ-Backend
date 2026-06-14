@@ -14,6 +14,8 @@ from app.core.exceptions.repository_exceptions import (
 from app.models import Project
 from app.schemas.project import ProjectCreate, ProjectResponse
 
+import logging
+logger = logging.getLogger(__name__)
 
 class ProjectRepository:
     def __init__(self, db: Session) -> None:
@@ -82,4 +84,23 @@ class ProjectRepository:
             raise DatabaseOperationException(
                 "Failed to load project",
                 details={"project_id": str(project_id)},
+            ) from exc
+    
+    def get_by_id_and_user_id(self, project_id: uuid.UUID, user_id: uuid.UUID) -> ProjectResponse:
+        try:
+            logger.info(f"Loading project with ID {project_id} for user {user_id}")
+            stmt = select(Project).where(Project.id == project_id, Project.user_id == user_id)
+            project = self._db.execute(stmt).scalar_one_or_none()
+            if not project:
+                raise RecordNotFoundException(
+                    "Project not found",
+                    details={"project_id": str(project_id), "user_id": str(user_id)},
+                )
+            return self._to_response(project)
+        except RecordNotFoundException:
+            raise
+        except SQLAlchemyError as exc:
+            raise DatabaseOperationException(
+                "Failed to load project",
+                details={"project_id": str(project_id), "user_id": str(user_id)},
             ) from exc

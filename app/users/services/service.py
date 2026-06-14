@@ -10,7 +10,11 @@ from __future__ import annotations
 import uuid
 
 from app.core.enums import UserRole
-from app.core.exceptions.domain_exceptions import ConflictError, EntityNotFoundError
+from app.core.exceptions.domain_exceptions import (
+    ConflictError,
+    EntityNotFoundError,
+    PersistenceError,
+)
 from app.core.exceptions.repository_exceptions import (
     DatabaseOperationException,
     DuplicateRecordException,
@@ -41,7 +45,7 @@ class UserService:
                 raise EntityNotFoundError("user", user_id)
             return user
         except DatabaseOperationException as exc:
-            raise ConflictError("Unable to retrieve user") from exc
+            raise PersistenceError("Unable to retrieve user") from exc
 
     def get_user(self, user_id: uuid.UUID) -> UserResponse:
         user = self.get_user_internal(user_id)
@@ -62,7 +66,7 @@ class UserService:
                 items=items, total=total, page=page, size=size, pages=pages
             )
         except DatabaseOperationException as exc:
-            raise ConflictError("Unable to list users") from exc
+            raise PersistenceError("Unable to list users") from exc
 
     def create_admin(
         self, email: str, full_name: str, password: str
@@ -90,7 +94,7 @@ class UserService:
         except DuplicateRecordException as exc:
             raise ConflictError("User with this email already exists") from exc
         except DatabaseOperationException as exc:
-            raise ConflictError("Unable to create user") from exc
+            raise PersistenceError("Unable to create user") from exc
 
     def update_user(
         self, user_id: uuid.UUID, update_data: UserUpdate
@@ -112,7 +116,7 @@ class UserService:
         except DuplicateRecordException as exc:
             raise ConflictError("User update conflicts with existing data") from exc
         except DatabaseOperationException as exc:
-            raise ConflictError("Unable to update user") from exc
+            raise PersistenceError("Unable to update user") from exc
 
     # ── Delete ───────────────────────────────────────────────
 
@@ -122,4 +126,4 @@ class UserService:
         except RecordNotFoundException as exc:
             raise EntityNotFoundError("user", user_id) from exc
         except DatabaseOperationException as exc:
-            raise ConflictError("Unable to delete user") from exc
+            raise PersistenceError("Unable to delete user") from exc

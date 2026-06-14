@@ -8,6 +8,7 @@ from app.core.exceptions.domain_exceptions import (
     AuthenticationError,
     AuthorizationError,
     EntityNotFoundError,
+    PersistenceError,
 )
 from app.core.exceptions.repository_exceptions import (
     DatabaseOperationException,
@@ -57,7 +58,7 @@ class AuthService:
             token = self._jwt_service.create_access_token(user.id, role.value)
             return token, self._to_response(user)
         except DatabaseOperationException as exc:
-            raise AuthenticationError("Authentication failed") from exc
+            raise PersistenceError("Unable to authenticate admin") from exc
 
     # GitHub OAuth
 
@@ -142,13 +143,15 @@ class AuthService:
                 github_user_data.get("id"),
             )
             raise AuthenticationError("GitHub account conflict") from exc
-        except (RecordNotFoundException, DatabaseOperationException) as exc:
+        except RecordNotFoundException as exc:
             logger.error(
                 "GitHub authentication failed for GitHub ID %s: %s",
                 github_user_data.get("id"),
                 exc,
             )
             raise AuthenticationError("GitHub authentication failed") from exc
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to authenticate via GitHub") from exc
 
     # Helpers
 
@@ -160,7 +163,7 @@ class AuthService:
                 raise EntityNotFoundError("user", user_id)
             return self._to_response(user)
         except DatabaseOperationException as exc:
-            raise AuthenticationError("Unable to retrieve current user") from exc
+            raise PersistenceError("Unable to retrieve current user") from exc
 
     def validate_access_token(self, token: str) -> TokenPayload:
         payload = self._jwt_service.decode_access_token(token)

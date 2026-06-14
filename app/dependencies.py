@@ -1,10 +1,3 @@
-"""Global dependency-injection wiring.
-
-Exposes factory functions consumed by ``Depends(...)`` in route handlers.
-Each function composes repositories and services so the layers remain
-decoupled.
-"""
-
 from __future__ import annotations
 
 from fastapi import Depends
@@ -17,6 +10,7 @@ from app.core.database import get_db
 from app.users.repositories.role_repository import RoleRepository
 from app.users.repositories.repository import UserRepository
 from app.users.services.service import UserService
+from app.queues.scans_queue_service import ScansQueueService
 
 
 def get_user_repository(
@@ -72,3 +66,12 @@ def build_auth_service(
     jwt_service: JWTService,
 ) -> AuthService:
     return AuthService(user_repo, role_repo, jwt_service)
+
+
+
+def get_scans_queue_service() -> ScansQueueService:
+    return build_scans_queue_service()
+
+
+def build_scans_queue_service() -> ScansQueueService:
+    return ScansQueueService()

@@ -1,9 +1,18 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
 import json
+from pathlib import Path
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.path_utils import resolve_scan_repo_base_dir
+
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+
 
 def _resolve_env_file() -> str:
-    return "./.env.development"
+    return str(BASE_DIR / ".env.development")
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -21,6 +30,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     ENCRYPTION_KEY: str
+    RESET_DB_ON_STARTUP: bool = True
 
     # GitHub OAuth
     GITHUB_CLIENT_ID: str
@@ -47,11 +57,19 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str
     CELERY_RESULT_BACKEND: str
 
+    # Scan workspace
+    SCAN_REPO_BASE_DIR: Path
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, str):
             return json.loads(v)
         return v
+
+    @field_validator("SCAN_REPO_BASE_DIR", mode="before")
+    @classmethod
+    def parse_scan_repo_base_dir(cls, v: Path | str) -> Path:
+        return resolve_scan_repo_base_dir(v, base_dir=BASE_DIR)
 
 settings = Settings()

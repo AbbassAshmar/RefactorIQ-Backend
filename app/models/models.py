@@ -4,12 +4,13 @@
 
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, Enum, ForeignKey, String, Table, Text, Column
+from sqlalchemy import BigInteger, Boolean, ForeignKey, String, Table, Text, Column, Enum, DateTime, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 
-from app.core.enums import UserRole
+from app.core.enums import UserRole, ScanStatus
 from app.models.base import Base, TimestampMixin, UUIDMixin
+from datetime import datetime
 
 class User(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "users"
@@ -22,13 +23,13 @@ class User(UUIDMixin, TimestampMixin, Base):
     github_username: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     github_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
 
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default=text("true"))
 
     # foreign key 
     role_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("roles.id", ondelete="SET NULL"),
-        nullable=True
+        nullable=False
     )
 
     # relationships
@@ -67,7 +68,16 @@ class Permission(UUIDMixin, Base):
 class Role(UUIDMixin, Base):
     __tablename__ = "roles"
 
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[UserRole] = mapped_column(
+        Enum(
+            UserRole,
+            name="user_role_enum",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        default=UserRole.CLIENT,
+        nullable=False,
+        server_default=text("'client'")
+    )
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     permissions: Mapped[list["Permission"]] = relationship(secondary=role_permissions, back_populates="roles")
@@ -91,9 +101,54 @@ class Project(UUIDMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
 
-    # Relationship back to User
+    # Relationship back to User, and to Scans
     user: Mapped["User"] = relationship("User", back_populates="projects")
+    scans: Mapped[list["Scan"]] = relationship(
+        "Scan",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
 
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "repo_owner",
+            "repo_name",
+            "branch",
+            name="uq_user_repo_branch"
+        ),
+    )
     def __repr__(self) -> str:
         return f"<Project {self.name} owner={self.repo_owner} repo={self.repo_name} branch={self.branch} user_id={self.user_id}>"
 
+
+class Scan(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "scans"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+    status: Mapped[ScanStatus] = mapped_column(
+        Enum(
+            ScanStatus,
+            name="scan_status_enum",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
+        default=ScanStatus.PENDING,
+        server_default=text(f"'{ScanStatus.PENDING.value}'")
+    )
+    project: Mapped["Project"] = relationship("Project", back_populates="scans")
+
+    def __repr__(self) -> str:
+        return f"<Scan project_id={self.project_id} status={self.status}>"
