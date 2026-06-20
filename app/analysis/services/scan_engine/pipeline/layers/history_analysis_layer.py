@@ -1,61 +1,55 @@
-import ast
+import hashlib
 import logging
-from app.scans.services.scan_execution_service.pipeline.metrics_vector import MetricsVector
+import os
+import random
+
+from app.analysis.services.scan_engine.pipeline.metrics_vector import MetricsVector
 
 logger = logging.getLogger(__name__)
 
 
-class HistoryAnalysisLayer():
+class HistoryAnalysisLayer:
+    """Layer 2 - deterministic production-shaped git history stub."""
+
     LAYER_NAME = "history_analysis"
 
-    METRICS = [ ]
-
-    def run(self, file_path: str) -> MetricsVector:
+    def run(self, file_path: str | os.PathLike[str]) -> MetricsVector:
         vector = MetricsVector(layer=self.LAYER_NAME, file_path=file_path)
 
         try:
-            source = self._read_file(file_path)
-            tree = ast.parse(source)
-        except Exception as exc:
-            vector.errors.append(f"Failed to parse file: {exc}")
-            return vector   # return empty vector, don't crash the pipeline
+            rng = self._rng(file_path)
+            lifetime_updates = rng.randint(2, 90)
+            recent_updates = rng.randint(0, min(lifetime_updates, 18))
+            total_churn = rng.randint(lifetime_updates * 3, lifetime_updates * 45)
+            current_loc = max(1, self._current_loc(file_path))
+            bug_fix_commits = rng.randint(0, max(1, lifetime_updates // 4))
 
-        for metric_name in self.METRICS:
-            try:
-                fn = getattr(self, metric_name)
-                result = fn(source, tree)
-                vector.metrics[metric_name] = result
-            except Exception as exc:
-                # one metric failing must never kill the whole layer
-                vector.errors.append(f"{metric_name} failed: {exc}")
-                vector.metrics[metric_name] = None
+            vector.metrics = {
+                "contributors_count": rng.randint(1, 7),
+                "update_count": lifetime_updates,
+                "recent_update_count": recent_updates,
+                "historical_update_count": lifetime_updates - recent_updates,
+                "recent_to_lifetime_update_ratio": round(recent_updates / lifetime_updates, 3),
+                "churn_rate": total_churn,
+                "churn_to_size_ratio": round(total_churn / current_loc, 3),
+                "bug_fix_commit_count": bug_fix_commits,
+                "bug_fix_ratio": round(bug_fix_commits / lifetime_updates, 3),
+                "cyclomatic_complexity_growth_rate": round(rng.uniform(-0.15, 1.85), 3),
+                "co_change_file_count": rng.randint(0, 12),
+            }
+        except Exception as exc:
+            logger.warning("[HISTORY] dummy layer failed for %s: %s", file_path, exc)
+            vector.errors.append(f"history dummy metrics failed: {exc}")
 
         return vector
 
-    # ── Metric functions ─────────────────────────────────────────────────────
+    def _current_loc(self, file_path: str | os.PathLike[str]) -> int:
+        try:
+            with open(file_path, "r", encoding="utf-8") as file:
+                return sum(1 for _ in file)
+        except OSError:
+            return 1
 
-    def compute_loc(self, source: str, tree: ast.AST) -> int:
-        logger.debug("[HISTORY] computing LOC")
-        # TODO: use radon
-        return 0
-
-    def compute_cyclomatic_complexity(self, source: str, tree: ast.AST) -> float:
-        logger.debug("[HISTORY] computing cyclomatic complexity")
-        # TODO: use radon
-        return 0.0
-
-    def compute_cognitive_complexity(self, source: str, tree: ast.AST) -> float:
-        logger.debug("[HISTORY] computing cognitive complexity")
-        # TODO: use complexipy
-        return 0.0
-
-    def compute_function_count(self, source: str, tree: ast.AST) -> int:
-        logger.debug("[HISTORY] computing function count")
-        # TODO: AST walk
-        return 0
-
-    # ── Helpers ──────────────────────────────────────────────────────────────
-
-    def _read_file(self, path: str) -> str:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
+    def _rng(self, seed_value: str | os.PathLike[str]) -> random.Random:
+        digest = hashlib.sha256(str(seed_value).encode("utf-8")).hexdigest()
+        return random.Random(int(digest[:16], 16))

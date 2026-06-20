@@ -15,29 +15,31 @@ logger = logging.getLogger(__name__)
 
 
 class ScanPipeline:
+    def __init__(
+            self, 
+            static_layer: StaticAnalysisLayer = None,
+            history_layer: HistoryAnalysisLayer = None,
+            duplication_layer: DuplicationAnalysisLayer = None,
+            architectural_layer: ArchitectureAnalysisLayer = None,
+            decision_layer: DecisionAnalysisLayer = None
+        ):
+        self.static_layer = static_layer
+        self.history_layer = history_layer
+        self.duplication_layer = duplication_layer
+        self.architectural_layer = architectural_layer
+        self.decision_layer = decision_layer
 
-    def __init__(self, scan_id: UUID, file_paths: list[str]):
-        self.scan_id = scan_id
-        self.file_paths = file_paths
-
-        # Instantiate layers — inject dependencies here as they grow
-        self.static_layer = StaticAnalysisLayer()
-        self.history_layer = HistoryAnalysisLayer()
-        self.duplication_layer = DuplicationAnalysisLayer()
-        self.architectural_layer = ArchitectureAnalysisLayer()
-        self.decision_layer = DecisionAnalysisLayer()
-
-    def run(self) -> list[MetricsVector]:
+    def run(self, file_paths: list[str]) -> list[MetricsVector]:
         all_vectors: list[MetricsVector] = []
 
         # ── Stage 1: per-file layers, run in parallel ─────────────────────
-        logger.info("[PIPELINE] stage 1 — per-file analysis (%d files)", len(self.file_paths))
-        all_vectors.extend(self._run_per_file_stage())
+        logger.info("[PIPELINE] stage 1 — per-file analysis (%d files)", len(file_paths))
+        all_vectors.extend(self._run_per_file_stage(file_paths))
 
         # ── Stage 2: cross-file layers, need all files ────────────────────
         logger.info("[PIPELINE] stage 2 — cross-file analysis")
-        all_vectors.extend(self.duplication_layer.run(self.file_paths))
-        all_vectors.extend(self.architectural_layer.run(self.file_paths))
+        all_vectors.extend(self.duplication_layer.run(file_paths))
+        all_vectors.extend(self.architectural_layer.run(file_paths))
 
         # ── Stage 3: aggregation ──────────────────────────────────────────
         logger.info("[PIPELINE] stage 3 — decision layer")
@@ -45,13 +47,13 @@ class ScanPipeline:
 
         return all_vectors
 
-    def _run_per_file_stage(self) -> list[MetricsVector]:
+    def _run_per_file_stage(self, file_paths: list[str]) -> list[MetricsVector]:
         vectors = []
         # Each file runs both layer 1 and layer 2 concurrently
         with ThreadPoolExecutor() as executor:
             futures = {
                 executor.submit(self._run_file_layers, fp): fp
-                for fp in self.file_paths
+                for fp in file_paths
             }
             for future in as_completed(futures):
                 file_path = futures[future]

@@ -1,61 +1,49 @@
-import ast
+import hashlib
 import logging
-from app.scans.services.scan_execution_service.pipeline.metrics_vector import MetricsVector
+import os
+import random
+
+from app.analysis.services.scan_engine.pipeline.metrics_vector import MetricsVector
 
 logger = logging.getLogger(__name__)
 
 
-class DuplicationAnalysisLayer():
+class DuplicationAnalysisLayer:
+    """Layer 3 - deterministic production-shaped duplication stub."""
+
     LAYER_NAME = "duplication_analysis"
 
-    METRICS = [ ]
+    def run(self, file_paths: list[str | os.PathLike[str]]) -> list[MetricsVector]:
+        return [self._build_vector(file_path, file_paths) for file_path in file_paths]
 
-    def run(self, file_paths: list[str]) -> list[MetricsVector]:
-        vector = MetricsVector(layer=self.LAYER_NAME, file_path=file_paths[0] if file_paths else None)
+    def _build_vector(
+        self,
+        file_path: str | os.PathLike[str],
+        all_file_paths: list[str | os.PathLike[str]],
+    ) -> MetricsVector:
+        vector = MetricsVector(layer=self.LAYER_NAME, file_path=file_path)
 
         try:
-            source = self._read_file(file_paths[0])  # for now, just analyze the first file in the list
-            tree = ast.parse(source)
-        except Exception as exc:
-            vector.errors.append(f"Failed to parse file: {exc}")
-            return vector   # return empty vector, don't crash the pipeline
+            rng = self._rng(file_path)
+            duplicate_blocks = rng.randint(0, 8)
+            semantic_blocks = rng.randint(0, 5)
+            group_size = 0 if duplicate_blocks == 0 and semantic_blocks == 0 else rng.randint(2, min(7, max(2, len(all_file_paths))))
 
-        for metric_name in self.METRICS:
-            try:
-                fn = getattr(self, metric_name)
-                result = fn(source, tree)
-                vector.metrics[metric_name] = result
-            except Exception as exc:
-                # one metric failing must never kill the whole layer
-                vector.errors.append(f"{metric_name} failed: {exc}")
-                vector.metrics[metric_name] = None
+            vector.metrics = {
+                "duplicate_blocks_count": duplicate_blocks,
+                "duplicate_loc_count": duplicate_blocks * rng.randint(4, 28),
+                "duplication_group_size": group_size,
+                "semantic_duplicate_blocks_count": semantic_blocks,
+                "ast_duplicate_blocks_count": rng.randint(0, max(1, duplicate_blocks)),
+                "max_similarity_score": round(rng.uniform(0.45, 0.98), 3) if group_size else 0.0,
+                "duplicate_file_candidates_count": max(0, group_size - 1),
+            }
+        except Exception as exc:
+            logger.warning("[DUPLICATION] dummy layer failed for %s: %s", file_path, exc)
+            vector.errors.append(f"duplication dummy metrics failed: {exc}")
 
         return vector
 
-    # ── Metric functions ─────────────────────────────────────────────────────
-
-    def compute_loc(self, source: str, tree: ast.AST) -> int:
-        logger.debug("[DUPPLICATION] computing LOC")
-        # TODO: use radon
-        return 0
-
-    def compute_cyclomatic_complexity(self, source: str, tree: ast.AST) -> float:
-        logger.debug("[DUPPLICATION] computing cyclomatic complexity")
-        # TODO: use radon
-        return 0.0
-
-    def compute_cognitive_complexity(self, source: str, tree: ast.AST) -> float:
-        logger.debug("[DUPPLICATION] computing cognitive complexity")
-        # TODO: use complexipy
-        return 0.0
-
-    def compute_function_count(self, source: str, tree: ast.AST) -> int:
-        logger.debug("[DUPPLICATION] computing function count")
-        # TODO: AST walk
-        return 0
-
-    # ── Helpers ──────────────────────────────────────────────────────────────
-
-    def _read_file(self, path: str) -> str:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
+    def _rng(self, seed_value: str | os.PathLike[str]) -> random.Random:
+        digest = hashlib.sha256(f"{self.LAYER_NAME}:{seed_value}".encode("utf-8")).hexdigest()
+        return random.Random(int(digest[:16], 16))

@@ -3,6 +3,8 @@ from pathlib import Path
 from uuid import UUID
 import shutil
 
+import logging
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ScanWorkspace:
@@ -21,6 +23,10 @@ class ScanWorkspace:
         object.__setattr__(self, "root_path", root)
 
     def python_files(self) -> list[Path]:
+        logger.info(f"[WORKSPACE] Scanning for Python files in workspace {self.scan_id} at {self.root_path}")
+        # self.root_path.rglob("*.py")
+        logger.info(f"[WORKSPACE] Found {len(list(self.root_path.rglob('*.py')))} Python files in workspace {self.scan_id} before filtering")
+        
         return [
             path
             for path in self.root_path.rglob("*.py")

@@ -8,9 +8,9 @@ MetricValue = int | float | str | bool | None
 
 @dataclass(slots=True)
 class MetricsVector:
-    scan_id: UUID
     layer: str
     file_path: str | None
+    scan_id: UUID | None = None
 
     metrics: dict[str, MetricValue] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
