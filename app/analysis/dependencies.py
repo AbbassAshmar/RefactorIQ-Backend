@@ -24,6 +24,8 @@ from app.github.services.service import GithubService
 from app.scans.repositories.scan_repository import ScanRepository
 from app.scans.services.scan_service import ScanService
 from app.scans.dependencies import get_scan_service
+from app.scan_visualization.dependencies import get_scan_visualization_repository
+from app.scan_visualization.repository import ScanVisualizationRepository
 
 from app.analysis.services.scan_engine.pipeline.layers.architecture_analysis_layer import ArchitectureAnalysisLayer
 from app.analysis.services.scan_engine.pipeline.layers.decision_analysis_layer import DecisionAnalysisLayer
@@ -62,6 +64,7 @@ def get_scan_pipeline(
     duplication_layer: DuplicationAnalysisLayer = Depends(get_duplication_analysis_layer),
     architectural_layer: ArchitectureAnalysisLayer = Depends(get_architecture_analysis_layer),
     decision_layer: DecisionAnalysisLayer = Depends(get_decision_analysis_layer),
+    visualization_repository: ScanVisualizationRepository = Depends(get_scan_visualization_repository),
 ) -> ScanPipeline:
     return ScanPipeline(
         static_layer=static_layer,
@@ -69,6 +72,7 @@ def get_scan_pipeline(
         duplication_layer=duplication_layer,
         architectural_layer=architectural_layer,
         decision_layer=decision_layer,
+        visualization_storage=visualization_repository,
     )
 
 def get_scan_engine_service(
@@ -85,7 +89,9 @@ def get_scan_engine_service(
     )
 
 
-def build_scan_pipeline() -> ScanPipeline:
+def build_scan_pipeline(
+    visualization_repository: ScanVisualizationRepository | None = None,
+) -> ScanPipeline:
     static_layer = StaticAnalysisLayer()
     history_layer = HistoryAnalysisLayer()
     duplication_layer = DuplicationAnalysisLayer()
@@ -98,10 +104,12 @@ def build_scan_pipeline() -> ScanPipeline:
         duplication_layer=duplication_layer,
         architectural_layer=architectural_layer,
         decision_layer=decision_layer,
+        visualization_storage=visualization_repository,
     )
 
 def build_scan_engine_service(db: Session) -> ScanEngineService:
     scan_repository = ScanRepository(db)
+    visualization_repository = ScanVisualizationRepository(db)
     scan_queue_service = build_scans_queue_service()
     scan_service = ScanService(scan_repository, scan_queue_service)
 
@@ -116,7 +124,7 @@ def build_scan_engine_service(db: Session) -> ScanEngineService:
         scan_service=scan_service,
         github_service=github_service,
         workspace_service=build_scan_workspace_service(),
-        scan_pipeline=build_scan_pipeline(),
+        scan_pipeline=build_scan_pipeline(visualization_repository),
     )
 
 

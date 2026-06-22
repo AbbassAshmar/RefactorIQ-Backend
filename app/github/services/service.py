@@ -117,7 +117,6 @@ class GithubService:
                     "git", "clone",
                     "--branch", branch,
                     "--single-branch",
-                    "--depth", "1",
                     url,
                     str(destination),
                 ],

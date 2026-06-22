@@ -1,5 +1,5 @@
 from app.models.base import Base
-from app.models.models import Project, Permission, Role, Scan, User
+from app.models.models import Project, Permission, Role, Scan, ScanVisualizationRecord, User
 
 __all__ = [
     "Base",
@@ -7,5 +7,6 @@ __all__ = [
     "Role",
     "Project",
     "Scan",
+    "ScanVisualizationRecord",
     "User",
 ]

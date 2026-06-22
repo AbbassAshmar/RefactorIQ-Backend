@@ -4,9 +4,9 @@
 
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, String, Table, Text, Column, Enum, DateTime, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, String, Table, Text, Column, Enum, DateTime, Index, JSON, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.core.enums import UserRole, ScanStatus
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -152,3 +152,25 @@ class Scan(UUIDMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<Scan project_id={self.project_id} status={self.status}>"
+
+
+json_payload_type = JSONB().with_variant(JSON(), "sqlite")
+
+
+class ScanVisualizationRecord(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "scan_visualization_records"
+
+    scan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    layer: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    file_path: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    metrics: Mapped[dict] = mapped_column(json_payload_type, nullable=False, default=dict)
+    errors: Mapped[list] = mapped_column(json_payload_type, nullable=False, default=list)
+    metadata_json: Mapped[dict] = mapped_column("metadata", json_payload_type, nullable=False, default=dict)
+
+    __table_args__ = (
+        Index("ix_scan_visualization_scan_layer", "scan_id", "layer"),
+        Index("ix_scan_visualization_scan_file", "scan_id", "file_path"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ScanVisualizationRecord scan_id={self.scan_id} layer={self.layer} file_path={self.file_path}>"

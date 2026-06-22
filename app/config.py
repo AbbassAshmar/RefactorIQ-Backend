@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     GITHUB_REDIRECT_URI: str
 
     # CORS
-    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
     # Application
     APP_NAME: str = "RefactorIQ"

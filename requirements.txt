@@ -36,6 +36,7 @@ mando==0.7.1
 markdown-it-py==4.2.0
 MarkupSafe==3.0.3
 mdurl==0.1.2
+networkx==3.6.1
 packaging==26.0
 passlib==1.7.4
 pillow==12.2.0

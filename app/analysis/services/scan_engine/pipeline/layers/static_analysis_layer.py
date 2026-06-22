@@ -155,7 +155,7 @@ class StaticAnalysisLayer:
         logger.debug("[STATIC] computing long condition count")
         count = 0
         for node in ast.walk(context.tree):
-            test = getattr(node, "test", None)
+            test = getattr(node, "test", None) # Conditional expressions (if, while, etc.) have a 'test' attribute
             if test is not None and self._condition_operand_count(test) >= self.LONG_CONDITION_OPERAND_THRESHOLD:
                 count += 1
         return count
