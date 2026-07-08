@@ -1,6 +1,7 @@
 # app/scans/pipeline/scan_pipeline.py
 
 import logging
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Protocol
 from uuid import UUID
@@ -62,9 +63,9 @@ class ScanPipeline:
 
         # ── Stage 3: aggregation ──────────────────────────────────────────
         logger.info("[PIPELINE] stage 3 — decision layer")
-        decision_vector = self.decision_layer.run(all_vectors)
-        self._record_vectors(scan_id, [decision_vector])
-        all_vectors.append(decision_vector)
+        decision_vectors = self._run_decision_stage(all_vectors)
+        self._record_vectors(scan_id, decision_vectors)
+        all_vectors.extend(decision_vectors)
 
         return all_vectors
 
@@ -89,6 +90,19 @@ class ScanPipeline:
             self.static_layer.run(file_path),
             self.history_layer.run(file_path),
         ]
+
+    def _run_decision_stage(self, vectors: list[MetricsVector]) -> list[MetricsVector]:
+        grouped: dict[str, list[MetricsVector]] = defaultdict(list)
+        for vector in vectors:
+            if vector.file_path is None:
+                continue
+            grouped[str(vector.file_path)].append(vector)
+
+        decision_vectors = [
+            self.decision_layer.run(file_vectors)
+            for _, file_vectors in sorted(grouped.items())
+        ]
+        return [*decision_vectors, self.decision_layer.summarize(decision_vectors)]
 
     def _clear_visualization(self, scan_id: UUID | None) -> None:
         if scan_id is None or self.visualization_storage is None:
