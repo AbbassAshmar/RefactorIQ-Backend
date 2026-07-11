@@ -4,7 +4,7 @@
 
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, String, Table, Text, Column, Enum, DateTime, Index, JSON, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, ForeignKey, Integer, String, Table, Text, Column, Enum, DateTime, Index, JSON, Numeric, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
@@ -28,7 +28,7 @@ class User(UUIDMixin, TimestampMixin, Base):
     # foreign key 
     role_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("roles.id", ondelete="SET NULL"),
+        ForeignKey("roles.id", ondelete="CASCADE"),
         nullable=False
     )
 
@@ -174,3 +174,109 @@ class ScanVisualizationRecord(UUIDMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<ScanVisualizationRecord scan_id={self.scan_id} layer={self.layer} file_path={self.file_path}>"
+
+
+class ScanFile(UUIDMixin, Base):
+    __tablename__ = "files"
+
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("scans.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    refactor_score: Mapped[float | None] = mapped_column(Numeric(6, 5), nullable=True)
+    priority_band: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metrics: Mapped[dict] = mapped_column(json_payload_type, nullable=False, default=dict)
+    metadata_json: Mapped[dict] = mapped_column("metadata", json_payload_type, nullable=False, default=dict)
+    errors: Mapped[dict] = mapped_column(json_payload_type, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("scan_id", "file_path", name="uq_files_scan_file_path"),
+        Index("idx_files_scan_score", "scan_id", "refactor_score"),
+        Index("idx_files_scan_band", "scan_id", "priority_band"),
+        Index("idx_files_metrics", "metrics", postgresql_using="gin"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ScanFile scan_id={self.scan_id} file_path={self.file_path}>"
+
+
+class DependencyEdge(Base):
+    __tablename__ = "dependency_edges"
+
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("scans.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    source_file_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("files.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    target_file_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("files.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    __table_args__ = (
+        Index("idx_dep_edges_source", "scan_id", "source_file_id"),
+        Index("idx_dep_edges_target", "scan_id", "target_file_id"),
+    )
+
+
+class CircularDependencyGroup(UUIDMixin, Base):
+    __tablename__ = "circular_dependency_groups"
+
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("scans.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class CircularDependencyMember(Base):
+    __tablename__ = "circular_dependency_members"
+
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("circular_dependency_groups.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("files.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+
+class CoChangeEdge(Base):
+    __tablename__ = "co_change_edges"
+
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("scans.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    file_id_a: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("files.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    file_id_b: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("files.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint("file_id_a < file_id_b", name="ck_co_change_file_order"),
+    )

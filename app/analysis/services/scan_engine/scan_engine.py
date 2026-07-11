@@ -55,7 +55,11 @@ class ScanEngineService:
             logger.info(f"[SCAN] Found {len(file_paths)} Python files for scan {scan_id}")
             logger.info(f"[SCAN] Found {len(file_paths)} Python files for scan {scan_id}")
 
-            self._scan_pipeline.run(file_paths, scan_id=scan_id)
+            self._scan_pipeline.run(
+                file_paths,
+                repo_root=workspace.root_path,
+                scan_id=scan_id,
+            )
         finally:
             logger.info(f"[SCAN] Cleaning up workspace for scan {scan_id}")
             try:

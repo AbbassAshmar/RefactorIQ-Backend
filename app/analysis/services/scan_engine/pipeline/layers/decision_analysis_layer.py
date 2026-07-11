@@ -2,16 +2,18 @@ import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
-from app.analysis.services.scan_engine.pipeline.metrics_vector import MetricValue, MetricsVector
+from app.analysis.services.scan_engine.pipeline.metrics_vector import LayerResult, MetricValue, MetricsVector
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class DecisionAnalysisContext:
-    file_path: str
-    vectors: list[MetricsVector]
+    absolute_path: Path
+    relative_path: str
+    result: LayerResult
     metrics: dict[str, MetricValue]
     available_layers: set[str]
     error_count: int
@@ -88,15 +90,17 @@ class DecisionAnalysisLayer:
             "score_confidence": self.score_confidence,
         }
 
-    def run(self, vectors: list[MetricsVector]) -> MetricsVector:
-        logger.info("[DECISION] running decision analysis on %d vectors for one file", len(vectors))
-
-        vector = MetricsVector(layer=self.LAYER_NAME, file_path=None)
+    def run(self, result: LayerResult) -> LayerResult:
+        logger.info("[DECISION] running decision analysis on %d vectors for one file", len(result.vectors))
 
         try:
-            file_path = self._file_path_for(vectors)
-            vector.file_path = file_path
-            context = self._build_context(file_path, vectors)
+            absolute_path, relative_path = self._paths_for(result)
+            vector = MetricsVector(
+                layer=self.LAYER_NAME,
+                absolute_path=absolute_path,
+                relative_path=relative_path,
+            )
+            context = self._build_context(absolute_path, relative_path, result)
             for metric_name, handler in self.metric_handlers.items():
                 try:
                     vector.metrics[metric_name] = handler(context)
@@ -106,14 +110,15 @@ class DecisionAnalysisLayer:
 
             vector.metadata = self._metadata_for_context(context, vector.metrics)
         except Exception as exc:
+            vector = MetricsVector(layer=self.LAYER_NAME)
             logger.warning("[DECISION] failed to score file: %s", exc)
             vector.errors.append(f"decision metrics failed: {exc}")
             vector.metrics = self._safe_default_metrics()
 
-        return vector
+        return LayerResult.from_vector(vector)
 
-    def summarize(self, decision_vectors: list[MetricsVector]) -> MetricsVector:
-        return self._build_summary_vector(decision_vectors)
+    def summarize(self, decision_result: LayerResult) -> LayerResult:
+        return LayerResult.from_vector(self._build_summary_vector(decision_result))
 
     # -- Metric handlers ---------------------------------------------------
 
@@ -202,23 +207,37 @@ class DecisionAnalysisLayer:
 
     # -- Context and summary helpers --------------------------------------
 
-    def _file_path_for(self, vectors: list[MetricsVector]) -> str:
-        file_paths = {
-            str(vector.file_path)
-            for vector in vectors
-            if vector.file_path is not None and vector.layer != self.LAYER_NAME
+    def _paths_for(self, result: LayerResult) -> tuple[Path, str]:
+        relative_paths = {
+            vector.relative_path
+            for vector in result.vectors
+            if vector.relative_path is not None and vector.layer != self.LAYER_NAME
         }
-        if len(file_paths) != 1:
+        if len(relative_paths) != 1:
             raise ValueError("DecisionAnalysisLayer.run expects vectors for exactly one file")
-        return next(iter(file_paths))
 
-    def _build_context(self, file_path: str, vectors: list[MetricsVector]) -> DecisionAnalysisContext:
+        absolute_paths = {
+            vector.absolute_path
+            for vector in result.vectors
+            if vector.absolute_path is not None and vector.layer != self.LAYER_NAME
+        }
+        if len(absolute_paths) != 1:
+            raise ValueError("DecisionAnalysisLayer.run received inconsistent absolute paths")
+
+        return next(iter(absolute_paths)), next(iter(relative_paths))
+
+    def _build_context(
+        self,
+        absolute_path: Path,
+        relative_path: str,
+        result: LayerResult,
+    ) -> DecisionAnalysisContext:
         metrics: dict[str, MetricValue] = {}
         available_layers: set[str] = set()
         error_count = 0
         none_metric_count = 0
 
-        for vector in vectors:
+        for vector in result.vectors:
             available_layers.add(vector.layer)
             error_count += len(vector.errors)
             for metric_name, metric_value in vector.metrics.items():
@@ -227,8 +246,9 @@ class DecisionAnalysisLayer:
                     none_metric_count += 1
 
         return DecisionAnalysisContext(
-            file_path=file_path,
-            vectors=vectors,
+            absolute_path=absolute_path,
+            relative_path=relative_path,
+            result=result,
             metrics=metrics,
             available_layers=available_layers,
             error_count=error_count,
@@ -265,11 +285,12 @@ class DecisionAnalysisLayer:
             "none_metric_count": context.none_metric_count,
         }
 
-    def _build_summary_vector(self, decision_vectors: list[MetricsVector]) -> MetricsVector:
-        vector = MetricsVector(layer=self.LAYER_NAME, file_path=None)
+    def _build_summary_vector(self, decision_result: LayerResult) -> MetricsVector:
+        vector = MetricsVector(layer=self.LAYER_NAME)
         scored_files = [
-            (str(file_vector.file_path), float(file_vector.metrics.get("refactor_score") or 0.0))
-            for file_vector in decision_vectors
+            (str(file_vector.relative_path), float(file_vector.metrics.get("refactor_score") or 0.0))
+            for file_vector in decision_result.vectors
+            if file_vector.relative_path is not None
         ]
         scores = [score for _, score in scored_files]
         top_files = sorted(scored_files, key=lambda item: item[1], reverse=True)[:10]

@@ -6,12 +6,14 @@ from contextlib import contextmanager
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.analysis.repositories.scan_result_repository import ScanResultRepository
 from app.analysis.services.scan_engine.pipeline.scan_workspace import (
     ScanWorkspaceService,
 )
+from app.analysis.services.scan_engine.pipeline.code_embedding_service import CodeEmbeddingService
 from app.analysis.services.scan_engine.scan_engine import ScanEngineService
 from app.config import settings
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, get_db
 from app.dependencies import (
     build_role_repository,
     build_scans_queue_service,
@@ -49,14 +51,30 @@ def get_static_analysis_layer() -> StaticAnalysisLayer:
 def get_history_analysis_layer() -> HistoryAnalysisLayer:
     return HistoryAnalysisLayer()
 
+def build_code_embedding_service() -> CodeEmbeddingService:
+    return CodeEmbeddingService(
+        model_id=settings.CODE_EMBEDDING_MODEL_ID,
+        model_path=settings.CODE_EMBEDDING_MODEL_PATH,
+        batch_size=settings.CODE_EMBEDDING_BATCH_SIZE,
+        device=settings.CODE_EMBEDDING_DEVICE,
+        max_length=settings.CODE_EMBEDDING_MAX_LENGTH,
+        trust_remote_code=settings.CODE_EMBEDDING_TRUST_REMOTE_CODE,
+        local_files_only=settings.CODE_EMBEDDING_LOCAL_FILES_ONLY,
+    )
+
 def get_duplication_analysis_layer() -> DuplicationAnalysisLayer:
-    return DuplicationAnalysisLayer()
+    return DuplicationAnalysisLayer(embedding_service=build_code_embedding_service())
 
 def get_architecture_analysis_layer() -> ArchitectureAnalysisLayer:
     return ArchitectureAnalysisLayer()
 
 def get_decision_analysis_layer() -> DecisionAnalysisLayer: 
     return DecisionAnalysisLayer()
+
+def get_scan_result_repository(
+    db: Session = Depends(get_db),
+) -> ScanResultRepository:
+    return ScanResultRepository(db)
 
 def get_scan_pipeline(
     static_layer: StaticAnalysisLayer = Depends(get_static_analysis_layer),
@@ -65,6 +83,7 @@ def get_scan_pipeline(
     architectural_layer: ArchitectureAnalysisLayer = Depends(get_architecture_analysis_layer),
     decision_layer: DecisionAnalysisLayer = Depends(get_decision_analysis_layer),
     visualization_repository: ScanVisualizationRepository = Depends(get_scan_visualization_repository),
+    analysis_repository: ScanResultRepository = Depends(get_scan_result_repository),
 ) -> ScanPipeline:
     return ScanPipeline(
         static_layer=static_layer,
@@ -73,6 +92,7 @@ def get_scan_pipeline(
         architectural_layer=architectural_layer,
         decision_layer=decision_layer,
         visualization_storage=visualization_repository,
+        analysis_storage=analysis_repository,
     )
 
 def get_scan_engine_service(
@@ -91,10 +111,11 @@ def get_scan_engine_service(
 
 def build_scan_pipeline(
     visualization_repository: ScanVisualizationRepository | None = None,
+    analysis_repository: ScanResultRepository | None = None,
 ) -> ScanPipeline:
     static_layer = StaticAnalysisLayer()
     history_layer = HistoryAnalysisLayer()
-    duplication_layer = DuplicationAnalysisLayer()
+    duplication_layer = DuplicationAnalysisLayer(embedding_service=build_code_embedding_service())
     architectural_layer = ArchitectureAnalysisLayer()
     decision_layer = DecisionAnalysisLayer()
 
@@ -105,11 +126,13 @@ def build_scan_pipeline(
         architectural_layer=architectural_layer,
         decision_layer=decision_layer,
         visualization_storage=visualization_repository,
+        analysis_storage=analysis_repository,
     )
 
 def build_scan_engine_service(db: Session) -> ScanEngineService:
     scan_repository = ScanRepository(db)
     visualization_repository = ScanVisualizationRepository(db)
+    analysis_repository = ScanResultRepository(db)
     scan_queue_service = build_scans_queue_service()
     scan_service = ScanService(scan_repository, scan_queue_service)
 
@@ -124,7 +147,7 @@ def build_scan_engine_service(db: Session) -> ScanEngineService:
         scan_service=scan_service,
         github_service=github_service,
         workspace_service=build_scan_workspace_service(),
-        scan_pipeline=build_scan_pipeline(visualization_repository),
+        scan_pipeline=build_scan_pipeline(visualization_repository, analysis_repository),
     )
 
 

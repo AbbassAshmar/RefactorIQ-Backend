@@ -2,7 +2,6 @@ import ast
 import keyword
 import logging
 import math
-import os
 import tokenize
 from collections import defaultdict
 from collections.abc import Callable
@@ -16,7 +15,7 @@ from app.analysis.services.scan_engine.pipeline.code_embedding_service import (
     CodeEmbeddingProvider,
     CodeEmbeddingService,
 )
-from app.analysis.services.scan_engine.pipeline.metrics_vector import MetricsVector
+from app.analysis.services.scan_engine.pipeline.metrics_vector import LayerResult, MetricsVector
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +48,8 @@ class BlockMatch:
 
 @dataclass(slots=True)
 class DuplicationAnalysisContext:
-    repo_root: Path
-    file_paths: list[Path]
+    vectors: list[MetricsVector]
+    relative_path_by_absolute_path: dict[Path, str]
     blocks: list[CodeBlock] = field(default_factory=list)
     blocks_by_path: dict[Path, list[CodeBlock]] = field(default_factory=dict)
     read_errors: dict[Path, str] = field(default_factory=dict)
@@ -95,24 +94,21 @@ class DuplicationAnalysisLayer:
             "duplicate_file_candidates_count": self.duplicate_file_candidates_count,
         }
 
-    def run(self, file_paths: list[str | os.PathLike[str]]) -> list[MetricsVector]:
-        logger.info("[DUPLICATION] running duplication analysis on %d files", len(file_paths))
+    def run(self, vectors: list[MetricsVector]) -> LayerResult:
+        logger.info("[DUPLICATION] running duplication analysis on %d files", len(vectors))
+        self._validate_vectors(vectors)
 
-        normalized_paths = [Path(file_path).resolve() for file_path in file_paths]
-        vectors = [
-            MetricsVector(layer=self.LAYER_NAME, file_path=file_path)
-            for file_path in file_paths
-        ]
-
-        if not normalized_paths:
+        if not vectors:
             logger.warning("[DUPLICATION] no files to analyze")
-            return vectors
+            return LayerResult(vectors=vectors)
 
-        context = self._build_context(normalized_paths)
+        context = self._build_context(vectors)
         self._find_syntax_duplicates(context)
         self._find_semantic_duplicates(context)
 
-        for path, vector in zip(normalized_paths, vectors, strict=True):
+        for vector in vectors:
+            assert vector.absolute_path is not None
+            path = vector.absolute_path
             try:
                 for metric_name, handler in self.metric_handlers.items():
                     try:
@@ -133,18 +129,25 @@ class DuplicationAnalysisLayer:
 
         logger.info(
             "[DUPLICATION] completed duplication analysis on %d files with %d blocks",
-            len(file_paths),
+            len(vectors),
             len(context.blocks),
         )
-        return vectors
+        return LayerResult(vectors=vectors)
 
     # -- Context construction ---------------------------------------------
 
-    def _build_context(self, file_paths: list[Path]) -> DuplicationAnalysisContext:
-        repo_root = self._discover_repo_root(file_paths)
-        context = DuplicationAnalysisContext(repo_root=repo_root, file_paths=file_paths)
+    def _build_context(self, vectors: list[MetricsVector]) -> DuplicationAnalysisContext:
+        relative_path_by_absolute_path = {
+            vector.absolute_path: vector.relative_path
+            for vector in vectors
+            if vector.absolute_path is not None and vector.relative_path is not None
+        }
+        context = DuplicationAnalysisContext(
+            vectors=vectors,
+            relative_path_by_absolute_path=relative_path_by_absolute_path,
+        )
 
-        for path in file_paths:
+        for path in relative_path_by_absolute_path:
             try:
                 source = path.read_text(encoding="utf-8")
                 blocks = self._extract_blocks(path, source)
@@ -295,6 +298,8 @@ class DuplicationAnalysisLayer:
                     continue
 
                 similarity = self._cosine_similarity(embeddings[index], embeddings[right_index])
+                if not math.isfinite(similarity):
+                    continue
                 if similarity < self.semantic_similarity_threshold:
                     continue
 
@@ -310,6 +315,9 @@ class DuplicationAnalysisLayer:
         target: CodeBlock,
         similarity: float,
     ) -> None:
+        if not math.isfinite(similarity):
+            return
+
         matches_by_block[source.id].append(
             BlockMatch(
                 block_id=target.id,
@@ -370,7 +378,6 @@ class DuplicationAnalysisLayer:
     def _metadata_for_path(self, context: DuplicationAnalysisContext, path: Path) -> dict[str, object]:
         blocks = context.blocks_by_path.get(path, [])
         metadata: dict[str, object] = {
-            "repo_root": str(context.repo_root),
             "blocks_analyzed_count": len(blocks),
             "embedding_model": getattr(self.embedding_service, "model_id", self.embedding_service.__class__.__name__),
             "syntax_similarity_threshold": self.syntax_similarity_threshold,
@@ -437,6 +444,7 @@ class DuplicationAnalysisLayer:
             match.similarity
             for block in blocks
             for match in matches_by_block.get(block.id, [])
+            if math.isfinite(match.similarity)
         ]
         return round(max(similarities, default=0.0), 6)
 
@@ -448,7 +456,11 @@ class DuplicationAnalysisLayer:
     ) -> list[dict[str, object]]:
         sample: list[dict[str, object]] = []
         for block in blocks:
-            matches = matches_by_block.get(block.id, [])
+            matches = [
+                match
+                for match in matches_by_block.get(block.id, [])
+                if math.isfinite(match.similarity)
+            ]
             if not matches:
                 continue
 
@@ -459,7 +471,7 @@ class DuplicationAnalysisLayer:
                     "end_line": block.end_line,
                     "matched_files": sorted(
                         {
-                            self._node_path(context.repo_root, match.file_path)
+                            context.relative_path_by_absolute_path[match.file_path]
                             for match in matches
                         }
                     )[: self.MATCH_SAMPLE_LIMIT],
@@ -556,21 +568,9 @@ class DuplicationAnalysisLayer:
 
     # -- Path helpers ------------------------------------------------------
 
-    def _discover_repo_root(self, file_paths: list[Path]) -> Path:
-        for path in file_paths:
-            for directory in (path.parent, *path.parents):
-                if (directory / ".git").exists():
-                    return directory.resolve()
-
-        common_path = Path(os.path.commonpath([str(path.parent) for path in file_paths]))
-        return common_path.resolve()
-
-    def _node_path(self, repo_root: Path, file_path: Path) -> str:
-        try:
-            relative_path = file_path.relative_to(repo_root)
-        except ValueError:
-            relative_path = file_path
-        return f"/{relative_path.as_posix().lstrip('/')}"
+    def _validate_vectors(self, vectors: list[MetricsVector]) -> None:
+        if any(vector.absolute_path is None or vector.relative_path is None for vector in vectors):
+            raise ValueError("Duplication analysis requires both absolute_path and relative_path")
 
     def _safe_default_metrics(self) -> dict[str, int | float]:
         return {

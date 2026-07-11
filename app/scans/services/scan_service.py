@@ -7,7 +7,8 @@ from app.core.exceptions.domain_exceptions import EntityNotFoundError, Persisten
 from app.core.exceptions.repository_exceptions import DatabaseOperationException, RecordNotFoundException
 from app.scans.repositories.scan_repository import ScanRepository
 from app.queues.scans_queue_service import ScansQueueService
-from app.schemas.scan import ScanResponse, ScanProjectUserResponse
+from app.schemas.scan import ScanListFilters, ScanListResult, ScanResponse, ScanProjectUserResponse
+from app.core.enums import ScanStatus
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,20 @@ class ScanService:
             return scan
         except DatabaseOperationException as exc:
             raise PersistenceError("Unable to create scan") from exc
+
+    def list_scans(self, filters: ScanListFilters) -> ScanListResult:
+        try:
+            return self.scan_repository.list_scans(filters)
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to list scans") from exc
+
+    def update_scan_status(self, scan_id: uuid.UUID, status: ScanStatus) -> ScanResponse:
+        try:
+            return self.scan_repository.update_scan_status(scan_id, status)
+        except RecordNotFoundException as exc:
+            raise EntityNotFoundError("scan", scan_id) from exc
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to update scan status") from exc
     
     def get_scan_by_id(self, scan_id: uuid.UUID) -> ScanResponse:
         try: 

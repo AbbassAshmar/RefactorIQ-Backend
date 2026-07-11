@@ -14,6 +14,8 @@ from app.github.routes import router as github_router
 from app.projects.routes import router as projects_router
 from app.scans.scan_routes import router as scans_router
 from app.scan_visualization.routes import router as scan_visualization_router
+from app.overview.routes import router as overview_router
+from app.files.routes import router as files_router
 from app.users.routes import router as users_router
 from app.utils.response import ApiResponse
 
@@ -85,6 +87,8 @@ app.include_router(github_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(scans_router, prefix="/api/v1")
 app.include_router(scan_visualization_router, prefix="/api/v1")
+app.include_router(overview_router, prefix="/api/v1")
+app.include_router(files_router, prefix="/api/v1")
 
 
 # Health check 

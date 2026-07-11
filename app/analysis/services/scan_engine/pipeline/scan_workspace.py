@@ -3,6 +3,8 @@ from pathlib import Path
 from uuid import UUID
 import shutil
 
+from app.analysis.services.scan_engine.pipeline.metrics_vector import validate_relative_path
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ class ScanWorkspace:
     def relative_path(self, file_path: Path) -> str:
         file_path = file_path.resolve()
         self.ensure_inside_workspace(file_path)
-        return str(file_path.relative_to(self.root_path))
+        return validate_relative_path(file_path.relative_to(self.root_path).as_posix())
 
     def read_text(self, file_path: Path) -> str:
         file_path = file_path.resolve()

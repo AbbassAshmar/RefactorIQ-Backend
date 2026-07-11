@@ -4,6 +4,8 @@ import logging
 
 from app.analysis.dependencies import provide_scan_engine_service
 from app.analysis.services.scan_engine.scan_engine import ScanEngineService
+from app.core.enums import ScanStatus
+from app.scans.dependencies import provide_scan_service
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +83,12 @@ def on_scan_started(task: ScanTask, scan_id: UUID | None) -> None:
         task.request.retries + 1,
         task.max_retries + 1,
     )
-    # TODO: set scan status → RUNNING
+    if scan_id is None:
+        logger.error("Cannot mark scan as running without a scan_id")
+        return
+    with provide_scan_service() as scan_service:
+        scan_service.update_scan_status(scan_id, ScanStatus.RUNNING)
+    logger.info("[SCAN STATUS UPDATED] scan_id=%s status=%s", scan_id, ScanStatus.RUNNING.value)
 
 
 def on_scan_succeeded(task: ScanTask, scan_id: UUID | None) -> None:
@@ -91,7 +98,12 @@ def on_scan_succeeded(task: ScanTask, scan_id: UUID | None) -> None:
         scan_id,
         task.request.id,
     )
-    # TODO: set scan status → COMPLETED, notify user
+    if scan_id is None:
+        logger.error("Cannot mark scan as succeeded without a scan_id")
+        return
+    with provide_scan_service() as scan_service:
+        scan_service.update_scan_status(scan_id, ScanStatus.SUCCEEDED)
+    logger.info("[SCAN STATUS UPDATED] scan_id=%s status=%s", scan_id, ScanStatus.SUCCEEDED.value)
 
 
 def on_scan_attempt_failed(
@@ -115,7 +127,13 @@ def on_scan_attempt_failed(
             str(exc),
             exc_info=True,
         )
-        # TODO: set scan status → FAILED, fire alert, notify user
+        if scan_id is not None:
+            try:
+                with provide_scan_service() as scan_service:
+                    scan_service.update_scan_status(scan_id, ScanStatus.FAILED)
+                logger.info("[SCAN STATUS UPDATED] scan_id=%s status=%s", scan_id, ScanStatus.FAILED.value)
+            except Exception:
+                logger.exception("Failed to persist terminal scan status for scan_id=%s", scan_id)
     else:
         logger.warning(
             "[SCAN FAILED - RETRYING] scan_id=%s attempt=%d/%d error=%s",
@@ -125,7 +143,7 @@ def on_scan_attempt_failed(
             str(exc),
             exc_info=True,
         )
-        # TODO: set scan status → RETRYING
+        # There is no RETRYING enum; the scan remains RUNNING until the next attempt.
 
 
 def run_scan_pipeline(

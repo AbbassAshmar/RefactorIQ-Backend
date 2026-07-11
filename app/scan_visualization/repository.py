@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import asdict, is_dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +62,7 @@ class ScanVisualizationRepository:
             ScanVisualizationRecord(
                 scan_id=scan_id,
                 layer=vector.layer,
-                file_path=str(vector.file_path) if vector.file_path is not None else None,
+                file_path=vector.relative_path,
                 metrics=self._json_safe(vector.metrics),
                 errors=self._json_safe(vector.errors),
                 metadata_json=self._json_safe(vector.metadata),
@@ -143,6 +144,8 @@ class ScanVisualizationRepository:
     def _json_safe(self, value: Any) -> Any:
         if isinstance(value, uuid.UUID):
             return str(value)
+        if isinstance(value, float) and not isfinite(value):
+            return None
         if isinstance(value, (Path, os.PathLike)):
             return str(value)
         if is_dataclass(value):

@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from app.analysis.services.scan_engine.pipeline.metrics_vector import MetricsVector
+from app.analysis.services.scan_engine.pipeline.metrics_vector import (
+    LayerResult,
+    MetricsVector,
+    validate_relative_path,
+)
 
 try:
     from radon.complexity import cc_visit
@@ -18,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class HistoryAnalysisContext:
-    file_path: Path
+    absolute_path: Path
     repo_root: Path
-    relative_file_path: str
+    relative_path: str
     commit_hashes: list[str] | None = None
     recent_commit_hashes: list[str] | None = None
     co_changed_files: set[str] = field(default_factory=set)
@@ -53,22 +57,21 @@ class HistoryAnalysisLayer:
             "co_change_file_count": self.co_change_file_count,
         }
 
-    def run(self, file_path: str | os.PathLike[str]) -> MetricsVector:
-        vector = MetricsVector(layer=self.LAYER_NAME, file_path=file_path)
+    def run(self, vector: MetricsVector) -> LayerResult:
+        if vector.absolute_path is None or vector.relative_path is None:
+            raise ValueError("History analysis requires both absolute_path and relative_path")
 
         try:
-            path = Path(file_path).resolve()
-            repo_root = self._discover_repo_root(path)
-            relative_file_path = path.relative_to(repo_root).as_posix()
+            repo_root = self._discover_repo_root(vector.absolute_path)
             context = HistoryAnalysisContext(
-                file_path=path,
+                absolute_path=vector.absolute_path,
                 repo_root=repo_root,
-                relative_file_path=relative_file_path,
+                relative_path=vector.relative_path,
             )
         except Exception as exc:
             vector.errors.append(f"Failed to prepare git history context: {exc}")
             vector.metrics = self._safe_default_metrics()
-            return vector
+            return LayerResult.from_vector(vector)
 
         for metric_name, handler in self.metric_handlers.items():
             try:
@@ -79,20 +82,19 @@ class HistoryAnalysisLayer:
 
         vector.metadata.update(
             {
-                "repo_root": str(context.repo_root),
-                "relative_file_path": context.relative_file_path,
                 "co_change_commits_analyzed": context.co_change_commits_analyzed,
+                "co_changed_files": sorted(context.co_changed_files),
                 "co_changed_files_sample": sorted(context.co_changed_files)[:10],
             }
         )
-        logger.info("[HISTORY] Completed history analysis for %s with metrics: %s", file_path, vector.metrics)
-        return vector
+        logger.info("[HISTORY] Completed history analysis for %s with metrics: %s", vector.relative_path, vector.metrics)
+        return LayerResult.from_vector(vector)
 
     # -- Git metrics -------------------------------------------------------
 
     def contributors_count(self, context: HistoryAnalysisContext) -> int:
         logger.debug("[HISTORY] computing contributor count")
-        emails = self._git_lines(context, ["log", "--follow", "--format=%ae", "--", context.relative_file_path])
+        emails = self._git_lines(context, ["log", "--follow", "--format=%ae", "--", context.relative_path])
         return len({email.strip() for email in emails if email.strip()})
 
     def update_count(self, context: HistoryAnalysisContext) -> int:
@@ -119,7 +121,7 @@ class HistoryAnalysisLayer:
         total_churn = 0
         lines = self._git_lines(
             context,
-            ["log", "--follow", "--numstat", "--format=", "--", context.relative_file_path],
+            ["log", "--follow", "--numstat", "--format=", "--", context.relative_path],
         )
         for line in lines:
             parts = line.split()
@@ -130,11 +132,11 @@ class HistoryAnalysisLayer:
 
     def churn_to_size_ratio(self, context: HistoryAnalysisContext) -> float:
         logger.debug("[HISTORY] computing churn/size ratio")
-        return round(self.churn_rate(context) / max(1, self._current_loc(context.file_path)), 3)
+        return round(self.churn_rate(context) / max(1, self._current_loc(context.absolute_path)), 3)
 
     def bug_fix_commit_count(self, context: HistoryAnalysisContext) -> int:
         logger.debug("[HISTORY] computing bug-fix commit count")
-        subjects = self._git_lines(context, ["log", "--follow", "--format=%s", "--", context.relative_file_path])
+        subjects = self._git_lines(context, ["log", "--follow", "--format=%s", "--", context.relative_path])
         return sum(1 for subject in subjects if self._is_bug_fix_subject(subject))
 
     def bug_fix_ratio(self, context: HistoryAnalysisContext) -> float:
@@ -149,7 +151,7 @@ class HistoryAnalysisLayer:
         if cc_visit is None:
             raise RuntimeError("radon is not installed")
 
-        current_source = context.file_path.read_text(encoding="utf-8")
+        current_source = context.absolute_path.read_text(encoding="utf-8")
         current_complexity = self._average_cyclomatic_complexity(current_source)
         oldest_source = self._oldest_file_source(context)
         oldest_complexity = self._average_cyclomatic_complexity(oldest_source)
@@ -172,7 +174,7 @@ class HistoryAnalysisLayer:
         if context.commit_hashes is None:
             context.commit_hashes = self._git_lines(
                 context,
-                ["log", "--follow", "--format=%H", "--", context.relative_file_path],
+                ["log", "--follow", "--format=%H", "--", context.relative_path],
             )
         return context.commit_hashes
 
@@ -186,7 +188,7 @@ class HistoryAnalysisLayer:
                     "--since=3 months ago",
                     "--format=%H",
                     "--",
-                    context.relative_file_path,
+                    context.relative_path,
                 ],
             )
         return context.recent_commit_hashes
@@ -194,12 +196,12 @@ class HistoryAnalysisLayer:
     def _oldest_file_source(self, context: HistoryAnalysisContext) -> str:
         commits = self._git_lines(
             context,
-            ["log", "--follow", "--reverse", "--format=%H", "--", context.relative_file_path], # --follow tracks renames
+            ["log", "--follow", "--reverse", "--format=%H", "--", context.relative_path], # --follow tracks renames
         )
         if not commits:
-            return context.file_path.read_text(encoding="utf-8")
+            return context.absolute_path.read_text(encoding="utf-8")
 
-        return self._git_output(context, ["show", f"{commits[0]}:{context.relative_file_path}"])
+        return self._git_output(context, ["show", f"{commits[0]}:{context.relative_path}"])
 
     def _compute_co_changed_files(self, context: HistoryAnalysisContext) -> None:
         commits = self._commit_hashes(context)[: self.MAX_COMMITS_FOR_CO_CHANGE]
@@ -212,8 +214,12 @@ class HistoryAnalysisLayer:
             )
             for changed_file in changed_files:
                 normalized = changed_file.strip()
-                if normalized and normalized != context.relative_file_path:
-                    context.co_changed_files.add(normalized)
+                if not normalized or normalized == context.relative_path:
+                    continue
+                try:
+                    context.co_changed_files.add(validate_relative_path(normalized))
+                except (TypeError, ValueError):
+                    logger.warning("[HISTORY] ignoring invalid co-changed path: %s", normalized)
 
     def _git_lines(self, context: HistoryAnalysisContext, args: list[str]) -> list[str]:
         output = self._git_output(context, args)

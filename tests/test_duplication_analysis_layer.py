@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from pathlib import Path
 
 from app.analysis.services.scan_engine.pipeline.layers.duplication_analysis_layer import (
     DuplicationAnalysisLayer,
 )
+from app.analysis.services.scan_engine.pipeline.metrics_vector import MetricsVector
 
 
 class IndexedEmbeddingService:
@@ -29,6 +31,13 @@ class SemanticPairEmbeddingService:
             else:
                 vectors.append([0.0, 1.0])
         return vectors
+
+
+class NonFiniteEmbeddingService:
+    model_id = "fake-non-finite"
+
+    def encode(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[math.nan, 1.0] for _ in texts]
 
 
 def test_duplication_layer_detects_token_normalized_syntax_duplicates(tmp_path: Path) -> None:
@@ -71,8 +80,8 @@ def multiply(value, factor):
         embedding_service=IndexedEmbeddingService(),
         semantic_similarity_threshold=0.99,
     )
-    vectors = layer.run([left, right, unrelated])
-    by_path = {Path(vector.file_path).resolve(): vector for vector in vectors}
+    vectors = layer.run(_vectors(tmp_path, left, right, unrelated))
+    by_path = {vector.absolute_path: vector for vector in vectors}
 
     assert by_path[left].errors == []
     assert by_path[left].metrics["duplicate_blocks_count"] == 1
@@ -124,8 +133,8 @@ def render_title(title):
         syntax_similarity_threshold=0.99,
         semantic_similarity_threshold=0.95,
     )
-    vectors = layer.run([loop_sum, comprehension_sum, unrelated])
-    by_path = {Path(vector.file_path).resolve(): vector for vector in vectors}
+    vectors = layer.run(_vectors(tmp_path, loop_sum, comprehension_sum, unrelated))
+    by_path = {vector.absolute_path: vector for vector in vectors}
 
     assert by_path[loop_sum].errors == []
     assert by_path[loop_sum].metrics["duplicate_blocks_count"] == 0
@@ -137,6 +146,42 @@ def render_title(title):
     assert by_path[unrelated].metrics["semantic_duplicate_blocks_count"] == 0
 
 
+def test_duplication_layer_ignores_non_finite_semantic_similarities(tmp_path: Path) -> None:
+    _mark_repo_root(tmp_path)
+    left = _write(
+        tmp_path,
+        "src/pkg/left.py",
+        """
+def load_invoice_total(invoice):
+    subtotal = invoice.subtotal
+    tax = invoice.tax
+    return subtotal + tax
+""",
+    )
+    right = _write(
+        tmp_path,
+        "src/pkg/right.py",
+        """
+def load_order_total(order):
+    subtotal = order.subtotal
+    tax = order.tax
+    return subtotal + tax
+""",
+    )
+
+    layer = DuplicationAnalysisLayer(
+        embedding_service=NonFiniteEmbeddingService(),
+        syntax_similarity_threshold=1.0,
+    )
+    result = layer.run(_vectors(tmp_path, left, right))
+    by_path = {vector.absolute_path: vector for vector in result}
+
+    assert by_path[left].errors == []
+    assert by_path[left].metrics["semantic_duplicate_blocks_count"] == 0
+    assert by_path[left].metrics["max_similarity_score"] == 0.0
+    assert by_path[left].metadata["semantic_duplicate_blocks_sample"] == []
+
+
 def _mark_repo_root(path: Path) -> None:
     (path / ".git").mkdir()
 
@@ -146,3 +191,14 @@ def _write(root: Path, relative_path: str, source: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source.strip() + "\n", encoding="utf-8")
     return path
+
+
+def _vectors(root: Path, *paths: Path) -> list[MetricsVector]:
+    return [
+        MetricsVector(
+            layer=DuplicationAnalysisLayer.LAYER_NAME,
+            absolute_path=path,
+            relative_path=path.relative_to(root).as_posix(),
+        )
+        for path in paths
+    ]

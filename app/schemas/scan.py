@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict
 
@@ -60,3 +61,21 @@ class ScanProjectUserResponse(BaseModel):
     project: ScanProjectResponse
 
     model_config = ConfigDict(from_attributes=True)
+
+
+@dataclass(frozen=True)
+class ScanListFilters:
+    """Validated list criteria passed from the service to the repository."""
+
+    user_id: uuid.UUID
+    project_id: uuid.UUID | None = None
+    status: str | None = None
+    page: int = 1
+    limit: int = 10
+    sort_descending: bool = True
+
+
+@dataclass(frozen=True)
+class ScanListResult:
+    items: list[ScanResponse]
+    total_count: int

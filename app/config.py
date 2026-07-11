@@ -60,6 +60,21 @@ class Settings(BaseSettings):
     # Scan workspace
     SCAN_REPO_BASE_DIR: Path
 
+    # Code embeddings
+    CODE_EMBEDDING_MODEL_ID: str = "Salesforce/SFR-Embedding-Code-400M_R"
+    CODE_EMBEDDING_MODEL_PATH: Path | None = None
+    CODE_EMBEDDING_LOCAL_FILES_ONLY: bool = False
+    CODE_EMBEDDING_BATCH_SIZE: int = 8
+    CODE_EMBEDDING_DEVICE: str | None = None
+    CODE_EMBEDDING_MAX_LENGTH: int = 8192
+    CODE_EMBEDDING_TRUST_REMOTE_CODE: bool = True
+
+    # Replaceable LLM provider defaults for file summaries
+    GEMINI_API_KEY: str | None = None
+    GEMINI_MODEL: str = "gemini-3.5-flash"
+    GEMINI_API_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
+    GEMINI_TIMEOUT_SECONDS: float = 30.0
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
@@ -71,5 +86,16 @@ class Settings(BaseSettings):
     @classmethod
     def parse_scan_repo_base_dir(cls, v: Path | str) -> Path:
         return resolve_scan_repo_base_dir(v, base_dir=BASE_DIR)
+
+    @field_validator("CODE_EMBEDDING_MODEL_PATH", mode="before")
+    @classmethod
+    def parse_code_embedding_model_path(cls, v: Path | str | None) -> Path | None:
+        if v is None or v == "":
+            return None
+
+        path = Path(v)
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        return path.resolve()
 
 settings = Settings()

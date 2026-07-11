@@ -7,7 +7,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
-from app.analysis.services.scan_engine.pipeline.metrics_vector import MetricsVector
+from app.analysis.services.scan_engine.pipeline.metrics_vector import LayerResult, MetricsVector
 
 try:
     from radon.complexity import cc_visit
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class StaticAnalysisContext:
-    file_path: str
+    absolute_path: Path
     source: str
     tree: ast.AST
     raw_metrics: Any = None
@@ -68,17 +68,22 @@ class StaticAnalysisLayer:
             "count_of_empty_except_blocks": self.count_of_empty_except_blocks,
         }
 
-    def run(self, file_path: str) -> MetricsVector:
-        vector = MetricsVector(layer=self.LAYER_NAME, file_path=file_path)
+    def run(self, vector: MetricsVector) -> LayerResult:
+        if vector.absolute_path is None or vector.relative_path is None:
+            raise ValueError("Static analysis requires both absolute_path and relative_path")
 
         try:
-            source = self._read_file(file_path)
+            source = self._read_file(vector.absolute_path)
             tree = ast.parse(source)
         except Exception as exc:
             vector.errors.append(f"Failed to parse file: {exc}")
-            return vector
+            return LayerResult.from_vector(vector)
 
-        context = StaticAnalysisContext(file_path=file_path, source=source, tree=tree)
+        context = StaticAnalysisContext(
+            absolute_path=vector.absolute_path,
+            source=source,
+            tree=tree,
+        )
 
         for metric_name, handler in self.metric_handlers.items():
             try:
@@ -88,8 +93,12 @@ class StaticAnalysisLayer:
                 vector.errors.append(f"{metric_name} failed: {exc}")
                 vector.metrics[metric_name] = None
 
-        logger.info(f"[STATIC] Completed static analysis for {file_path} with metrics: {vector.metrics}")   
-        return vector
+        logger.info(
+            "[STATIC] Completed static analysis for %s with metrics: %s",
+            vector.relative_path,
+            vector.metrics,
+        )
+        return LayerResult.from_vector(vector)
 
     # -- Radon metrics -----------------------------------------------------
 
@@ -134,14 +143,14 @@ class StaticAnalysisLayer:
         if Coverage is None:
             raise RuntimeError("coverage.py is not installed")
 
-        data_file = self._find_coverage_data_file(context.file_path)
+        data_file = self._find_coverage_data_file(context.absolute_path)
         if data_file is None:
             return 0.0
 
         try:
             coverage = Coverage(data_file=str(data_file))
             coverage.load()
-            _, statements, _, missing, _ = coverage.analysis2(str(Path(context.file_path).resolve()))
+            _, statements, _, missing, _ = coverage.analysis2(str(context.absolute_path))
         except CoverageException:
             return 0.0
 
@@ -278,8 +287,8 @@ class StaticAnalysisLayer:
             return 0.0
         return float(sum(values) / len(values))
 
-    def _find_coverage_data_file(self, file_path: str) -> Path | None:
-        path = Path(file_path).resolve()
+    def _find_coverage_data_file(self, file_path: Path) -> Path | None:
+        path = file_path.resolve()
         search_start = path.parent if path.is_file() else path
 
         for directory in (search_start, *search_start.parents):
@@ -289,6 +298,5 @@ class StaticAnalysisLayer:
 
         return None
 
-    def _read_file(self, path: str) -> str:
-        with open(path, "r", encoding="utf-8") as file:
-            return file.read()
+    def _read_file(self, path: Path) -> str:
+        return path.read_text(encoding="utf-8")

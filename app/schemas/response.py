@@ -1,5 +1,6 @@
 # app/schemas/responses.py
 from typing import Optional, Dict, Any, Generic, TypeVar
+from uuid import UUID
 from pydantic import BaseModel, Field
 from datetime import datetime
 
@@ -19,6 +20,7 @@ class ResponseMeta(BaseModel):
     pagination: Optional[PaginationMeta] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     request_id: Optional[str] = None
+    scan_id: Optional[UUID] = None
 
 
 class ErrorDetail(BaseModel):

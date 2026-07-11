@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Protocol
 
 logger = logging.getLogger(__name__)
@@ -22,16 +23,20 @@ class CodeEmbeddingService:
     def __init__(
         self,
         model_id: str = DEFAULT_MODEL_ID,
+        model_path: str | Path | None = None,
         batch_size: int = 8,
         device: str | None = None,
         max_length: int = 8192,
         trust_remote_code: bool = True,
+        local_files_only: bool = False,
     ) -> None:
         self.model_id = model_id
+        self.model_path = Path(model_path).expanduser().resolve() if model_path else None
         self.batch_size = batch_size
         self.device = device
         self.max_length = max_length
         self.trust_remote_code = trust_remote_code
+        self.local_files_only = local_files_only
         self._tokenizer = None
         self._model = None
         self._torch = None
@@ -55,16 +60,27 @@ class CodeEmbeddingService:
                 return_tensors="pt",
             )
             encoded = {key: value.to(self.device) for key, value in encoded.items()}
+            encoded.setdefault("position_ids", self._position_ids_like(encoded["input_ids"]))
 
             with self._torch.no_grad():
                 outputs = self._model(**encoded)
                 hidden_states = self._last_hidden_state(outputs)
                 pooled = hidden_states[:, 0]
+                pooled = self._torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
                 pooled = self._functional.normalize(pooled, p=2, dim=1)
+                pooled = self._torch.nan_to_num(pooled, nan=0.0, posinf=0.0, neginf=0.0)
 
             vectors.extend(pooled.detach().cpu().float().tolist())
 
         return [[float(value) for value in vector] for vector in vectors]
+
+    def _position_ids_like(self, input_ids: object) -> object:
+        seq_length = input_ids.shape[1]
+        return self._torch.arange(
+            seq_length,
+            device=input_ids.device,
+            dtype=input_ids.dtype,
+        ).unsqueeze(0).expand(input_ids.shape[0], -1)
 
     def _ensure_loaded(self) -> None:
         if self._model is not None and self._tokenizer is not None:
@@ -82,17 +98,20 @@ class CodeEmbeddingService:
             ) from exc
 
         self.device = self._select_device(self.device)
-        logger.info("[EMBEDDINGS] loading code embedding model %s on %s", self.model_id, self.device)
+        model_source = self._model_source()
+        logger.info("[EMBEDDINGS] loading code embedding model from %s on %s", model_source, self.device)
         tokenizer = AutoTokenizer.from_pretrained(
-            self.model_id,
+            model_source,
             trust_remote_code=self.trust_remote_code,
+            local_files_only=self.local_files_only,
         )
         if getattr(tokenizer, "pad_token", None) is None and getattr(tokenizer, "eos_token", None) is not None:
             tokenizer.pad_token = tokenizer.eos_token
 
         model = AutoModel.from_pretrained(
-            self.model_id,
+            model_source,
             trust_remote_code=self.trust_remote_code,
+            local_files_only=self.local_files_only,
         )
         model.to(self.device)
         model.eval()
@@ -101,6 +120,20 @@ class CodeEmbeddingService:
         self._model = model
         self._torch = torch
         self._functional = functional
+
+    def _model_source(self) -> str:
+        if self.model_path is None:
+            return self.model_id
+
+        if not self.model_path.exists():
+            raise RuntimeError(f"Local embedding model path does not exist: {self.model_path}")
+
+        if not (self.model_path / "config.json").exists():
+            raise RuntimeError(
+                f"Local embedding model path must contain config.json: {self.model_path}"
+            )
+
+        return str(self.model_path)
 
     def _last_hidden_state(self, outputs: object) -> object:
         hidden_states = getattr(outputs, "last_hidden_state", None)

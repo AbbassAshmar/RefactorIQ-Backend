@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from app.analysis.services.scan_engine.pipeline.layers.history_analysis_layer import HistoryAnalysisLayer
+from app.analysis.services.scan_engine.pipeline.metrics_vector import MetricsVector
 
 
 def test_history_layer_counts_commits_contributors_bug_fixes_and_recent_split(tmp_path: Path) -> None:
@@ -30,7 +31,7 @@ def test_history_layer_counts_commits_contributors_bug_fixes_and_recent_split(tm
     peer.write_text("PEER = True\n", encoding="utf-8")
     _commit(repo, "fix branching bug", author="new@example.test")
 
-    vector = HistoryAnalysisLayer().run(target)
+    vector = HistoryAnalysisLayer().run(_vector(repo, target))
 
     assert _non_complexity_errors(vector.errors) == []
     assert vector.metrics["contributors_count"] == 2
@@ -50,7 +51,7 @@ def test_history_layer_computes_churn_and_churn_to_size_ratio(tmp_path: Path) ->
     target.write_text("A = 1\nB = 2\nC = 3\n", encoding="utf-8")
     _commit(repo, "add target")
 
-    vector = HistoryAnalysisLayer().run(target)
+    vector = HistoryAnalysisLayer().run(_vector(repo, target))
 
     assert _non_complexity_errors(vector.errors) == []
     assert vector.metrics["churn_rate"] == 3
@@ -68,7 +69,7 @@ def test_history_layer_caps_co_change_commit_scan_at_100(tmp_path: Path) -> None
         (repo / f"peer_{index}.py").write_text(f"PEER = {index}\n", encoding="utf-8")
         _commit(repo, f"change target with peer {index}")
 
-    vector = HistoryAnalysisLayer().run(target)
+    vector = HistoryAnalysisLayer().run(_vector(repo, target))
 
     assert _non_complexity_errors(vector.errors) == []
     assert vector.metadata["co_change_commits_analyzed"] == 100
@@ -92,7 +93,7 @@ def test_history_layer_computes_cyclomatic_complexity_growth(tmp_path: Path) -> 
     )
     _commit(repo, "increase complexity")
 
-    vector = HistoryAnalysisLayer().run(target)
+    vector = HistoryAnalysisLayer().run(_vector(repo, target))
 
     assert vector.errors == []
     assert vector.metrics["cyclomatic_complexity_growth_rate"] == 1.0
@@ -102,7 +103,13 @@ def test_history_layer_returns_safe_defaults_for_non_git_file(tmp_path: Path) ->
     target = tmp_path / "target.py"
     target.write_text("print('not tracked')\n", encoding="utf-8")
 
-    vector = HistoryAnalysisLayer().run(target)
+    vector = HistoryAnalysisLayer().run(
+        MetricsVector(
+            layer=HistoryAnalysisLayer.LAYER_NAME,
+            absolute_path=target,
+            relative_path="target.py",
+        )
+    )
 
     assert vector.has_errors()
     assert vector.metrics == {
@@ -167,3 +174,11 @@ def _non_complexity_errors(errors: list[str]) -> list[str]:
     if find_spec("radon") is not None:
         return errors
     return [error for error in errors if not error.startswith("cyclomatic_complexity_growth_rate failed")]
+
+
+def _vector(repo: Path, path: Path) -> MetricsVector:
+    return MetricsVector(
+        layer=HistoryAnalysisLayer.LAYER_NAME,
+        absolute_path=path,
+        relative_path=path.relative_to(repo).as_posix(),
+    )
