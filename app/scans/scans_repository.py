@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy.exc import NoResultFound, SQLAlchemyError
 from sqlalchemy import func, select
@@ -11,9 +11,21 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.exceptions.repository_exceptions import DatabaseOperationException, RecordNotFoundException
 from app.models import Scan
-from app.scans.scans_dtos import ScanListFilters, ScanListResult, ScanProjectUserResponse, ScanResponse
-from app.models.models import Project
+from app.scans.scans_dtos import (
+    AdminScanListFilters,
+    AdminScanRow,
+    FailedScanRow,
+    ScanListFilters,
+    ScanListResult,
+    ScanProjectUserResponse,
+    ScanResponse,
+)
+from app.models.models import Project, User
 from app.core.enums import ScanStatus
+
+from logging import getLogger
+
+logger = getLogger(__name__)
 
 class ScanRepository:
     def __init__(self, db: Session) -> None:
@@ -90,6 +102,7 @@ class ScanRepository:
         self,
         scan_id: uuid.UUID,
         status: ScanStatus,
+        error_message: str | None = None,
     ) -> ScanResponse:
         try:
             scan = self._db.get(Scan, scan_id)
@@ -101,6 +114,10 @@ class ScanRepository:
 
             now = datetime.now(timezone.utc)
             scan.status = status
+            if status == ScanStatus.FAILED:
+                scan.error_message = error_message
+            else:
+                scan.error_message = None
             if status == ScanStatus.RUNNING:
                 scan.started_at = scan.started_at or now
                 scan.finished_at = None
@@ -157,3 +174,212 @@ class ScanRepository:
                     "status": filters.status,
                 },
             ) from exc
+
+    def project_belongs_to_user(
+        self,
+        *,
+        project_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> bool:
+        try:
+            statement = select(func.count(Project.id)).where(
+                Project.id == project_id,
+                Project.user_id == user_id,
+            )
+            return bool(self._db.execute(statement).scalar_one())
+        except SQLAlchemyError as exc:
+            raise DatabaseOperationException(
+                "Failed to validate scan project ownership",
+                details={
+                    "project_id": str(project_id),
+                    "user_id": str(user_id),
+                },
+            ) from exc
+
+    def list_admin_scans(
+        self,
+        filters: AdminScanListFilters,
+    ) -> tuple[list[AdminScanRow], int]:
+        try:
+            conditions = []
+            if filters.project_id is not None:
+                conditions.append(Scan.project_id == filters.project_id)
+            if filters.status is not None:
+                conditions.append(Scan.status == filters.status)
+
+            total_statement = select(func.count(Scan.id)).where(*conditions)
+            total_count = int(self._db.execute(total_statement).scalar_one() or 0)
+
+            order_column = (
+                Scan.created_at.desc()
+                if filters.sort_descending
+                else Scan.created_at.asc()
+            )
+            statement = (
+                select(
+                    Scan.id,
+                    Scan.status,
+                    Scan.error_message,
+                    Scan.created_at,
+                    Scan.started_at,
+                    Scan.finished_at,
+                    Project.id,
+                    Project.name,
+                    User.id,
+                    User.username,
+                    User.email,
+                )
+                .join(Project, Scan.project_id == Project.id)
+                .join(User, Project.user_id == User.id)
+                .where(*conditions)
+                .order_by(order_column, Scan.id.desc())
+                .offset((filters.page - 1) * filters.limit)
+                .limit(filters.limit)
+            )
+            rows = self._db.execute(statement).all()
+            return (
+                [
+                    AdminScanRow(
+                        id=row[0],
+                        status=row[1],
+                        error_message=row[2],
+                        created_at=row[3],
+                        started_at=row[4],
+                        finished_at=row[5],
+                        project_id=row[6],
+                        project_name=row[7],
+                        owner_id=row[8],
+                        owner_username=row[9],
+                        owner_email=row[10],
+                    )
+                    for row in rows
+                ],
+                total_count,
+            )
+        except SQLAlchemyError as exc:
+            raise DatabaseOperationException(
+                "Failed to list administrative scans",
+                details={
+                    "project_id": str(filters.project_id) if filters.project_id else None,
+                    "status": filters.status.value if filters.status else None,
+                },
+            ) from exc
+
+    def count_scans(
+        self,
+        *,
+        status: ScanStatus | None = None,
+        created_from: datetime | None = None,
+        created_before: datetime | None = None,
+    ) -> int:
+        """Count scans, optionally filtered by status and creation window."""
+        try:
+            statement = select(func.count(Scan.id))
+            if status is not None:
+                statement = statement.where(Scan.status == status)
+            if created_from is not None:
+                statement = statement.where(Scan.created_at >= created_from)
+            if created_before is not None:
+                statement = statement.where(Scan.created_at < created_before)
+            return int(self._db.execute(statement).scalar_one() or 0)
+        except SQLAlchemyError as exc:
+            raise DatabaseOperationException(
+                "Failed to count scans",
+                details={"status": status.value if status else None},
+            ) from exc
+
+    def count_scans_by_day(
+        self,
+        *,
+        created_from: datetime,
+        created_before: datetime,
+        project_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
+    ) -> dict[date, int]:
+        """Count created scans by calendar day within a half-open window."""
+        try:
+            day = func.date(Scan.created_at)
+            conditions = [
+                Scan.created_at >= created_from,
+                Scan.created_at < created_before,
+            ]
+            if project_id is not None:
+                conditions.append(Scan.project_id == project_id)
+
+            statement = select(day, func.count(Scan.id))
+            if user_id is not None:
+                statement = statement.join(Project, Scan.project_id == Project.id)
+                conditions.append(Project.user_id == user_id)
+            statement = statement.where(*conditions).group_by(day).order_by(day.asc())
+            counts: dict[date, int] = {}
+            for day_value, count in self._db.execute(statement).all():
+                if isinstance(day_value, datetime):
+                    normalized_day = day_value.date()
+                elif isinstance(day_value, date):
+                    normalized_day = day_value
+                else:
+                    normalized_day = date.fromisoformat(str(day_value))
+                counts[normalized_day] = int(count)
+            return counts
+        except (SQLAlchemyError, ValueError) as exc:
+            raise DatabaseOperationException(
+                "Failed to aggregate scans over time"
+            ) from exc
+
+    def get_status_distribution(self) -> dict[ScanStatus, int]:
+        try:
+            statement = select(Scan.status, func.count(Scan.id)).group_by(Scan.status)
+            rows = self._db.execute(statement).all()
+            return {
+                status if isinstance(status, ScanStatus) else ScanStatus(status): int(count)
+                for status, count in rows
+            }
+        except (SQLAlchemyError, ValueError) as exc:
+            raise DatabaseOperationException(
+                "Failed to aggregate scan status distribution"
+            ) from exc
+
+    def list_failed_scans(self, *, limit: int) -> list[FailedScanRow]:
+        try:
+            failure_time = func.coalesce(
+                Scan.finished_at,
+                Scan.updated_at,
+                Scan.created_at,
+            )
+            statement = (
+                select(
+                    Scan.id,
+                    Scan.status,
+                    Scan.error_message,
+                    Scan.created_at,
+                    Scan.started_at,
+                    Scan.finished_at,
+                    Project.id,
+                    Project.name,
+                    User.id,
+                    User.username,
+                )
+                .join(Project, Scan.project_id == Project.id)
+                .join(User, Project.user_id == User.id)
+                .where(Scan.status == ScanStatus.FAILED)
+                .order_by(failure_time.desc(), Scan.id.desc())
+                .limit(limit)
+            )
+            return [
+                FailedScanRow(
+                    id=row[0],
+                    status=row[1],
+                    error_message=row[2],
+                    created_at=row[3],
+                    started_at=row[4],
+                    finished_at=row[5],
+                    project_id=row[6],
+                    project_name=row[7],
+                    user_id=row[8],
+                    username=row[9],
+                )
+                for row in self._db.execute(statement).all()
+            ]
+        except SQLAlchemyError as exc:
+            logger.exception("Failed to list failed scans", exc_info=exc)
+            raise DatabaseOperationException("Failed to list failed scans") from exc

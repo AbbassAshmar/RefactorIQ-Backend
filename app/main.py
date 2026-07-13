@@ -12,11 +12,17 @@ from app.core.middlewares.exceptions_handler import register_exception_handlers
 from app.auth.auth_routes import router as auth_router
 from app.github.github_routes import router as github_router
 from app.projects.projects_routes import router as projects_router
+from app.projects.projects_admin_routes import router as projects_admin_router
 from app.scans.scans_routes import router as scans_router
+from app.scans.scans_admin_routes import (
+    admin_scans_router,
+    analytics_router as scans_admin_analytics_router,
+)
 from app.scan_visualization.scan_visualization_routes import router as scan_visualization_router
 from app.overview.overview_routes import router as overview_router
 from app.files.files_routes import router as files_router
 from app.users.users_routes import router as users_router
+from app.analytics.analytics_routes import router as analytics_router
 from app.utils.response import ApiResponse
 
 from app.core.database import engine
@@ -85,10 +91,14 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(github_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
+app.include_router(projects_admin_router, prefix="/api/v1")
 app.include_router(scans_router, prefix="/api/v1")
+app.include_router(scans_admin_analytics_router, prefix="/api/v1")
+app.include_router(admin_scans_router, prefix="/api/v1")
 app.include_router(scan_visualization_router, prefix="/api/v1")
 app.include_router(overview_router, prefix="/api/v1")
 app.include_router(files_router, prefix="/api/v1")
+app.include_router(analytics_router, prefix="/api/v1")
 
 
 # Health check 

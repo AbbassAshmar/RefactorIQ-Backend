@@ -50,8 +50,13 @@ TOP_REFACTOR_FILE_COUNT = 5
 TOP_DIRECTORY_COUNT = 5
 
 ROLE_PERMISSIONS = {
-    "admin": ["manage-users", "manage-scans"],
-    "client": [],
+    "admin": [
+        "manage-users",
+        "manage-scans",
+        "view-analytics",
+        "manage-projects",
+    ],
+    "client": ["view-own-scans", "create-scans"],
 }
 
 GENERAL_SUMMARY_PROMPT = """

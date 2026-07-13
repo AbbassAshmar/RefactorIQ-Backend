@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -231,6 +232,23 @@ class UserRepository:
             return [self._to_internal(u) for u in rows], total
         except SQLAlchemyError as exc:
             raise DatabaseOperationException("Failed to list users") from exc
+
+    def count_users(
+        self,
+        *,
+        created_from: datetime | None = None,
+        created_before: datetime | None = None,
+    ) -> int:
+        """Count users, optionally within a half-open creation-time window."""
+        try:
+            statement = select(func.count(User.id))
+            if created_from is not None:
+                statement = statement.where(User.created_at >= created_from)
+            if created_before is not None:
+                statement = statement.where(User.created_at < created_before)
+            return int(self._db.execute(statement).scalar_one() or 0)
+        except SQLAlchemyError as exc:
+            raise DatabaseOperationException("Failed to count users") from exc
 
 
     def update_github_token(

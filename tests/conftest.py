@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from typing import Generator
-from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -52,7 +52,12 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
             pass
 
     app.dependency_overrides[get_db] = _override_get_db
-    with TestClient(app) as c:
+    with (
+        patch("app.main.initialize_database"),
+        patch("app.main.create_roles_permissions"),
+        patch("app.main.create_admin"),
+        TestClient(app) as c,
+    ):
         yield c
     app.dependency_overrides.clear()
 

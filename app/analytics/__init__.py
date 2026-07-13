@@ -1,0 +1,1 @@
+"""Administrative analytics module."""

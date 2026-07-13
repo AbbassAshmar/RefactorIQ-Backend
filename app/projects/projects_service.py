@@ -13,7 +13,14 @@ from app.core.exceptions.repository_exceptions import (
     RecordNotFoundException,
 )
 from app.projects.projects_repository import ProjectRepository
-from app.projects.projects_dtos import ProjectCreate, ProjectResponse
+from app.projects.projects_dtos import (
+    AdminProjectListFilters,
+    AdminProjectListResult,
+    AdminProjectOwner,
+    AdminProjectResponse,
+    ProjectCreate,
+    ProjectResponse,
+)
 
 
 class ProjectService:
@@ -50,3 +57,35 @@ class ProjectService:
             raise EntityNotFoundError("project", project_id) from exc
         except DatabaseOperationException as exc:
             raise PersistenceError("Unable to retrieve project") from exc
+
+    def list_admin_projects(
+        self,
+        filters: AdminProjectListFilters,
+    ) -> AdminProjectListResult:
+        try:
+            rows, total_count = self._repo.list_admin_projects(filters)
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to list administrative projects") from exc
+        return AdminProjectListResult(
+            items=[
+                AdminProjectResponse(
+                    id=row.id,
+                    user_id=row.user_id,
+                    name=row.name,
+                    repo_owner=row.repo_owner,
+                    repo_name=row.repo_name,
+                    branch=row.branch,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                    owner=AdminProjectOwner(
+                        id=row.owner_id,
+                        username=row.owner_username,
+                        email=row.owner_email,
+                    ),
+                    scan_count=row.scan_count,
+                    average_scan_duration_seconds=row.average_scan_duration_seconds,
+                )
+                for row in rows
+            ],
+            total_count=total_count,
+        )

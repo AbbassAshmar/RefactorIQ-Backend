@@ -51,17 +51,17 @@ def test_get_repositories_and_branches_authenticated(client: TestClient):
     repositories_response = client.get("/api/v1/github/repositories")
     assert repositories_response.status_code == 200
     repositories_data = repositories_response.json()
-    assert repositories_data["data"][0]["name"] == "RefactorIQ-frontend"
-    assert repositories_data["data"][0]["owner"] == "AbbassAshmar"
+    assert repositories_data["data"]["repositories"][0]["name"] == "RefactorIQ-frontend"
+    assert repositories_data["data"]["repositories"][0]["owner"] == "AbbassAshmar"
 
     branches_response = client.get(
         "/api/v1/github/repositories/AbbassAshmar/Gollumia-Frontend/branches"
     )
     assert branches_response.status_code == 200
     branches_data = branches_response.json()
-    assert branches_data["data"][0]["name"] == "master"
+    assert branches_data["data"]["branches"][0]["name"] == "master"
     assert (
-        branches_data["data"][0]["commit_sha"]
+        branches_data["data"]["branches"][0]["commit_sha"]
         == "b0ddbff247a2d873d6b5907b979e48b4a853c67b"
     )
 

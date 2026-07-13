@@ -1,9 +1,3 @@
-"""Seed helpers for roles, permissions, and admin users.
-
-Exported methods:
-- ``create_roles_permissions``
-- ``create_admin``
-"""
 
 from __future__ import annotations
 
@@ -23,11 +17,20 @@ from app.models import Permission, Role, User  # noqa: E402
 DEFAULT_PERMISSIONS = [
     {"name": "manage-users", "description": "Create, update, delete users"},
     {"name": "manage-scans", "description": "Create, view, delete scans"},
+    {"name": "view-analytics", "description": "View administrative analytics"},
+    {"name": "manage-projects", "description": "View and manage all projects"},
+    {"name": "view-own-scans", "description": "View scans for owned projects"},
+    {"name": "create-scans", "description": "Create scans for owned projects"},
 ]
 
 ROLE_PERMISSION_MAP: dict[UserRole, list[str]] = {
-    UserRole.ADMIN: ["manage-users", "manage-scans"],
-    UserRole.CLIENT: [],
+    UserRole.ADMIN: [
+        "manage-users",
+        "manage-scans",
+        "view-analytics",
+        "manage-projects",
+    ],
+    UserRole.CLIENT: ["view-own-scans", "create-scans"],
 }
 
 ROLE_DESCRIPTIONS: dict[UserRole, str] = {

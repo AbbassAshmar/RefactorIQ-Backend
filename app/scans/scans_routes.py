@@ -10,7 +10,7 @@ from app.core.common_dtos import PaginationMeta, ResponseMeta
 from app.scans.scans_dtos import ScanListFilters
 from app.auth.auth_dtos import TokenPayload
 from app.dependencies import get_user_service
-from app.core.route_dependencies import get_current_payload
+from app.core.route_dependencies import require_permissions
 from app.projects.dependencies import get_project_service
 from app.utils.response import ApiResponse
 
@@ -32,7 +32,7 @@ def list_scans(
     sort: Literal["date_desc", "date_asc"] = "date_desc",
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=10, ge=1, le=100),
-    payload: TokenPayload = Depends(get_current_payload),
+    payload: TokenPayload = Depends(require_permissions(["view-own-scans"])),
     user_service: UserService = Depends(get_user_service),
     scan_service: ScanService = Depends(get_scan_service),
 ):
@@ -63,10 +63,27 @@ def list_scans(
         ),
     )
 
+
+@router.get("/scans-over-time")
+def get_scans_over_time(
+    project_id: uuid.UUID | None = None,
+    payload: TokenPayload = Depends(require_permissions(["view-own-scans"])),
+    user_service: UserService = Depends(get_user_service),
+    scan_service: ScanService = Depends(get_scan_service),
+):
+    user_id = uuid.UUID(payload.sub)
+    user_service.get_user(user_id)
+    return ApiResponse.success(
+        data=scan_service.get_scans_over_time(
+            project_id=project_id,
+            user_id=user_id,
+        ).model_dump()
+    )
+
 @router.post("/projects/{project_id}/scans")
 def scan_project(
     project_id: uuid.UUID,
-    payload: TokenPayload = Depends(get_current_payload),
+    payload: TokenPayload = Depends(require_permissions(["create-scans"])),
     user_service: UserService = Depends(get_user_service),
     project_service: ProjectService = Depends(get_project_service),
     scan_service: ScanService = Depends(get_scan_service),

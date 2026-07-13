@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -11,8 +12,13 @@ from app.core.exceptions.repository_exceptions import (
     DuplicateRecordException,
     RecordNotFoundException,
 )
-from app.models import Project
-from app.projects.projects_dtos import ProjectCreate, ProjectResponse
+from app.models import Project, Scan, User
+from app.projects.projects_dtos import (
+    AdminProjectListFilters,
+    AdminProjectRow,
+    ProjectCreate,
+    ProjectResponse,
+)
 
 import logging
 logger = logging.getLogger(__name__)
@@ -103,4 +109,138 @@ class ProjectRepository:
             raise DatabaseOperationException(
                 "Failed to load project",
                 details={"project_id": str(project_id), "user_id": str(user_id)},
+            ) from exc
+
+    def count_projects(
+        self,
+        *,
+        created_from: datetime | None = None,
+        created_before: datetime | None = None,
+    ) -> int:
+        """Count projects, optionally within a half-open creation-time window."""
+        try:
+            statement = select(func.count(Project.id))
+            if created_from is not None:
+                statement = statement.where(Project.created_at >= created_from)
+            if created_before is not None:
+                statement = statement.where(Project.created_at < created_before)
+            return int(self._db.execute(statement).scalar_one() or 0)
+        except SQLAlchemyError as exc:
+            raise DatabaseOperationException("Failed to count projects") from exc
+
+    def list_admin_projects(
+        self,
+        filters: AdminProjectListFilters,
+    ) -> tuple[list[AdminProjectRow], int]:
+        """List projects across all users with scan aggregates."""
+        try:
+            valid_duration = (
+                Scan.started_at.is_not(None)
+                & Scan.finished_at.is_not(None)
+                & (Scan.finished_at >= Scan.started_at)
+            )
+            duration_seconds = case(
+                (
+                    valid_duration,
+                    func.extract("epoch", Scan.finished_at)
+                    - func.extract("epoch", Scan.started_at),
+                ),
+                else_=None,
+            )
+            scan_count = func.count(Scan.id)
+            average_duration = func.avg(duration_seconds)
+
+            statement = (
+                select(
+                    Project.id,
+                    Project.user_id,
+                    Project.name,
+                    Project.repo_owner,
+                    Project.repo_name,
+                    Project.branch,
+                    Project.created_at,
+                    Project.updated_at,
+                    User.id,
+                    User.username,
+                    User.email,
+                    scan_count,
+                    average_duration,
+                )
+                .join(User, Project.user_id == User.id)
+                .outerjoin(Scan, Scan.project_id == Project.id)
+                .group_by(
+                    Project.id,
+                    Project.user_id,
+                    Project.name,
+                    Project.repo_owner,
+                    Project.repo_name,
+                    Project.branch,
+                    Project.created_at,
+                    Project.updated_at,
+                    User.id,
+                    User.username,
+                    User.email,
+                )
+            )
+
+            sort_expressions = {
+                "created_at": Project.created_at,
+                "name": func.lower(Project.name),
+                "owner": func.lower(User.username),
+                "scan_count": scan_count,
+                "scan_duration": average_duration,
+            }
+            sort_expression = sort_expressions[filters.sort_by]
+            ordering = (
+                sort_expression.desc()
+                if filters.sort_order == "desc"
+                else sort_expression.asc()
+            )
+            if filters.sort_by == "scan_duration":
+                ordering = ordering.nullslast()
+            id_ordering = (
+                Project.id.desc()
+                if filters.sort_order == "desc"
+                else Project.id.asc()
+            )
+            statement = (
+                statement.order_by(ordering, id_ordering)
+                .offset((filters.page - 1) * filters.limit)
+                .limit(filters.limit)
+            )
+
+            total = int(
+                self._db.execute(select(func.count(Project.id))).scalar_one() or 0
+            )
+            rows = self._db.execute(statement).all()
+            return (
+                [
+                    AdminProjectRow(
+                        id=row[0],
+                        user_id=row[1],
+                        name=row[2],
+                        repo_owner=row[3],
+                        repo_name=row[4],
+                        branch=row[5],
+                        created_at=row[6],
+                        updated_at=row[7],
+                        owner_id=row[8],
+                        owner_username=row[9],
+                        owner_email=row[10],
+                        scan_count=int(row[11] or 0),
+                        average_scan_duration_seconds=(
+                            round(float(row[12]), 2) if row[12] is not None else None
+                        ),
+                    )
+                    for row in rows
+                ],
+                total,
+            )
+        except (KeyError, SQLAlchemyError) as exc:
+            raise DatabaseOperationException(
+                "Failed to list administrative projects",
+                details={
+                    "sort_by": filters.sort_by,
+                    "sort_order": filters.sort_order,
+                },
             ) from exc

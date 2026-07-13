@@ -2,9 +2,11 @@
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
+
+from app.core.enums import ScanStatus
 
 
 class ScanCreate(BaseModel):
@@ -72,3 +74,109 @@ class ScanListFilters:
 class ScanListResult:
     items: list[ScanResponse]
     total_count: int
+
+
+@dataclass(frozen=True)
+class AdminScanListFilters:
+    project_id: uuid.UUID | None = None
+    status: ScanStatus | None = None
+    page: int = 1
+    limit: int = 10
+    sort_descending: bool = True
+
+
+@dataclass(frozen=True)
+class AdminScanRow:
+    id: uuid.UUID
+    status: ScanStatus
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    project_id: uuid.UUID
+    project_name: str
+    owner_id: uuid.UUID
+    owner_username: str
+    owner_email: str
+
+
+class AdminScanProject(BaseModel):
+    id: uuid.UUID
+    name: str
+
+
+class AdminScanOwner(BaseModel):
+    id: uuid.UUID
+    username: str
+    email: str
+
+
+class AdminScanResponse(BaseModel):
+    id: uuid.UUID
+    status: ScanStatus
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    project: AdminScanProject
+    owner: AdminScanOwner
+
+
+@dataclass(frozen=True)
+class AdminScanListResult:
+    items: list[AdminScanResponse]
+    total_count: int
+
+
+@dataclass(frozen=True)
+class FailedScanRow:
+    id: uuid.UUID
+    status: ScanStatus
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    project_id: uuid.UUID
+    project_name: str
+    user_id: uuid.UUID
+    username: str
+
+
+class ScanTimelinePoint(BaseModel):
+    date: date
+    count: int
+
+
+class ScanTimelineResponse(BaseModel):
+    granularity: str = "day"
+    points: list[ScanTimelinePoint]
+
+
+class ScanStatusCount(BaseModel):
+    status: ScanStatus
+    count: int
+
+
+class ScanStatusDistributionResponse(BaseModel):
+    statuses: list[ScanStatusCount]
+
+
+class FailedScanProject(BaseModel):
+    id: uuid.UUID
+    name: str
+
+
+class FailedScanUser(BaseModel):
+    id: uuid.UUID
+    username: str
+
+
+class FailedScanResponse(BaseModel):
+    id: uuid.UUID
+    status: ScanStatus
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    project: FailedScanProject
+    user: FailedScanUser

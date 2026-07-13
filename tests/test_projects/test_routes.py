@@ -69,16 +69,16 @@ def test_create_and_list_projects_authenticated(client: TestClient):
     create_response = client.post("/api/v1/projects/", json=body)
     assert create_response.status_code == 200
     create_data = create_response.json()
-    assert create_data["data"]["name"] == "My Project"
-    assert create_data["data"]["repo_owner"] == "owner"
-    assert create_data["data"]["repo_name"] == "repo-name"
-    assert create_data["data"]["branch"] == "main"
+    assert create_data["data"]["project"]["name"] == "My Project"
+    assert create_data["data"]["project"]["repo_owner"] == "owner"
+    assert create_data["data"]["project"]["repo_name"] == "repo-name"
+    assert create_data["data"]["project"]["branch"] == "main"
 
     list_response = client.get("/api/v1/projects/")
     assert list_response.status_code == 200
     list_data = list_response.json()
-    assert len(list_data["data"]) == 1
-    assert list_data["data"][0]["name"] == "My Project"
+    assert len(list_data["data"]["projects"]) == 1
+    assert list_data["data"]["projects"][0]["name"] == "My Project"
 
     app.dependency_overrides.pop(get_current_payload, None)
     app.dependency_overrides.pop(get_user_service, None)

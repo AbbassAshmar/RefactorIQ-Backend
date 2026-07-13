@@ -2,6 +2,8 @@
 
 from fastapi.testclient import TestClient
 
+from app.auth.auth_dtos import AdminLoginRequest
+
 
 def test_health_check(client: TestClient):
     response = client.get("/health")
@@ -16,6 +18,15 @@ def test_admin_login_invalid_credentials(client: TestClient):
         json={"email": "nobody@example.com", "password": "wrong"},
     )
     assert response.status_code == 401
+
+
+def test_admin_login_accepts_development_seed_email():
+    request = AdminLoginRequest(
+        email="admin@refactoriq.local",
+        password="admin12345",
+    )
+
+    assert request.email == "admin@refactoriq.local"
 
 
 def test_github_authorize_returns_url(client: TestClient):

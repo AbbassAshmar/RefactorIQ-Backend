@@ -148,7 +148,14 @@ class Scan(UUIDMixin, TimestampMixin, Base):
         default=ScanStatus.PENDING,
         server_default=text(f"'{ScanStatus.PENDING.value}'")
     )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     project: Mapped["Project"] = relationship("Project", back_populates="scans")
+
+    __table_args__ = (
+        Index("ix_scans_created_at", "created_at"),
+        Index("ix_scans_status_finished_at", "status", "finished_at"),
+        Index("ix_scans_project_id", "project_id"),
+    )
 
     def __repr__(self) -> str:
         return f"<Scan project_id={self.project_id} status={self.status}>"

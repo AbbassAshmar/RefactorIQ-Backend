@@ -130,7 +130,11 @@ def on_scan_attempt_failed(
         if scan_id is not None:
             try:
                 with provide_scan_service() as scan_service:
-                    scan_service.update_scan_status(scan_id, ScanStatus.FAILED)
+                    scan_service.update_scan_status(
+                        scan_id,
+                        ScanStatus.FAILED,
+                        error_message=str(exc) or exc.__class__.__name__,
+                    )
                 logger.info("[SCAN STATUS UPDATED] scan_id=%s status=%s", scan_id, ScanStatus.FAILED.value)
             except Exception:
                 logger.exception("Failed to persist terminal scan status for scan_id=%s", scan_id)
