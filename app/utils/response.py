@@ -1,9 +1,8 @@
-# app/utils/responses.py
 from typing import Any, Optional
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from app.schemas.response import (
+from app.core.common_dtos import (
     SuccessResponse,
     ErrorResponse,
     ErrorDetail,

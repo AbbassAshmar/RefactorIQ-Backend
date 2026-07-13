@@ -1,5 +1,3 @@
-"""Shared enums used across all layers (models, schemas, services)."""
-
 import enum
 
 

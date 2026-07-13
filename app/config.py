@@ -4,6 +4,7 @@ from pathlib import Path
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.constants import DEFAULT_GEMINI_MODEL
 from app.core.path_utils import resolve_scan_repo_base_dir
 
 
@@ -69,11 +70,9 @@ class Settings(BaseSettings):
     CODE_EMBEDDING_MAX_LENGTH: int = 8192
     CODE_EMBEDDING_TRUST_REMOTE_CODE: bool = True
 
-    # Replaceable LLM provider defaults for file summaries
+    # LLM provider
     GEMINI_API_KEY: str | None = None
-    GEMINI_MODEL: str = "gemini-3.5-flash"
-    GEMINI_API_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
-    GEMINI_TIMEOUT_SECONDS: float = 30.0
+    GEMINI_MODEL: str = DEFAULT_GEMINI_MODEL
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

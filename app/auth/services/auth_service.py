@@ -16,10 +16,10 @@ from app.core.exceptions.repository_exceptions import (
     RecordNotFoundException,
 )
 from app.core.security import verify_password
-from app.schemas.auth import TokenPayload
-from app.schemas.user import UserCreate, UserInternal, UserResponse
+from app.auth.auth_dtos import TokenPayload
+from app.users.users_dtos import UserCreate, UserInternal, UserResponse
 from app.users.repositories.role_repository import RoleRepository
-from app.users.repositories.repository import UserRepository
+from app.users.repositories.user_repository import UserRepository
 
 import logging
 logger = logging.getLogger(__name__)

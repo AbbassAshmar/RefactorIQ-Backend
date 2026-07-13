@@ -6,10 +6,10 @@ from fastapi import Depends, Request
 
 
 from app.auth.services.auth_service import AuthService
+from app.core.constants import COOKIE_NAME, ROLE_PERMISSIONS
 from app.core.enums import UserRole
 from app.dependencies import get_auth_service, get_db
-from app.schemas.auth import TokenPayload
-from app.auth.utils import COOKIE_NAME
+from app.auth.auth_dtos import TokenPayload
 
 
 from app.core.exceptions.domain_exceptions import (
@@ -17,13 +17,6 @@ from app.core.exceptions.domain_exceptions import (
     AuthorizationError,
 )
 
-
-COOKIE_NAME = "access_token"
-
-_ROLE_PERMISSIONS: dict[str, list[str]] = {
-    UserRole.ADMIN.value: ["manage-users", "manage-scans"],
-    UserRole.CLIENT.value: [],
-}
 
 # Authentication
 
@@ -63,7 +56,7 @@ def require_permissions(required_permissions: Iterable[str]):
     ) -> TokenPayload:
 
 
-        user_perms = _ROLE_PERMISSIONS.get(payload.role, [])
+        user_perms = ROLE_PERMISSIONS.get(payload.role, [])
 
         for perm in required_permissions:
             if perm not in user_perms:

@@ -3,7 +3,7 @@ from uuid import UUID
 import logging
 
 from app.analysis.dependencies import provide_scan_engine_service
-from app.analysis.services.scan_engine.scan_engine import ScanEngineService
+from app.analysis.services.scan_engine.scan_engine_service import ScanEngineService
 from app.core.enums import ScanStatus
 from app.scans.dependencies import provide_scan_service
 

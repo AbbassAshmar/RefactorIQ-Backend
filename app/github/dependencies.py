@@ -3,9 +3,9 @@ from __future__ import annotations
 from fastapi import Depends
 
 from app.dependencies import get_user_service
-from app.github.services.client_service import GithubClientService
-from app.github.services.service import GithubService
-from app.users.services.service import UserService
+from app.github.services.github_client_service import GithubClientService
+from app.github.services.github_service import GithubService
+from app.users.users_service import UserService
 
 
 def get_github_client_service() -> GithubClientService:

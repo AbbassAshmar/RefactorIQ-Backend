@@ -5,8 +5,8 @@ import uuid
 from pathlib import Path
 
 from app.analysis.services.scan_engine.pipeline.metrics_vector import MetricsVector
-from app.scan_visualization.repository import ScanVisualizationRepository
-from app.scan_visualization.service import ScanVisualizationService
+from app.scan_visualization.scan_visualization_repository import ScanVisualizationRepository
+from app.scan_visualization.scan_visualization_service import ScanVisualizationService
 
 
 def test_scan_visualization_snapshot_groups_files_and_circular_metadata(db_session):

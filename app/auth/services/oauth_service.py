@@ -5,11 +5,8 @@ from urllib.parse import urlencode
 import httpx
 
 from app.config import settings
+from app.core.constants import GITHUB_AUTH_URL, GITHUB_TOKEN_URL, GITHUB_USER_URL
 from app.core.exceptions.domain_exceptions import ExternalDependencyError
-
-GITHUB_AUTH_URL = "https://github.com/login/oauth/authorize"
-GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
-GITHUB_USER_URL = "https://api.github.com/user"
 
 
 class OAuthService:

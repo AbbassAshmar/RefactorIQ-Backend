@@ -5,7 +5,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from app.analysis.repositories.scan_result_repository import ScanResultRepository
+from app.analysis.scan_result_repository import ScanResultRepository
 from app.analysis.services.scan_engine.pipeline.metrics_vector import LayerResult, MetricsVector
 from app.models import CircularDependencyGroup, CircularDependencyMember, CoChangeEdge, DependencyEdge
 

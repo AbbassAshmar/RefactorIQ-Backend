@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from app.files.dtos import CircularDependencyRow, FileDetailRow, FileListRow, FileRelationshipRow
-from app.files.service import FileService
+from app.files.files_dtos import CircularDependencyRow, FileDetailRow, FileListRow, FileRelationshipRow
+from app.files.files_service import FileService
 
 
 class FakeFileRepository:

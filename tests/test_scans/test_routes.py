@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 from app.core.route_dependencies import get_current_payload
 from app.dependencies import get_user_service
 from app.scans.dependencies import get_scan_service
-from app.schemas.auth import TokenPayload
-from app.schemas.scan import ScanListResult, ScanResponse
+from app.auth.auth_dtos import TokenPayload
+from app.scans.scans_dtos import ScanListResult, ScanResponse
 
 
 def test_list_scans_requires_authentication(client: TestClient):

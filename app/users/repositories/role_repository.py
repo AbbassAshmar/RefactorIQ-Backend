@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.enums import UserRole
 from app.core.exceptions.repository_exceptions import DatabaseOperationException
 from app.models import Role
-from app.schemas.role import RoleInternal
+from app.users.users_dtos import RoleInternal
 
 
 class RoleRepository:

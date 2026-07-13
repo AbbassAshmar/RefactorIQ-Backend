@@ -9,14 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.core.middleware import AuthContextMiddleware, RequestLoggingMiddleware
 from app.core.middlewares.exceptions_handler import register_exception_handlers
-from app.auth.routes import router as auth_router
-from app.github.routes import router as github_router
-from app.projects.routes import router as projects_router
-from app.scans.scan_routes import router as scans_router
-from app.scan_visualization.routes import router as scan_visualization_router
-from app.overview.routes import router as overview_router
-from app.files.routes import router as files_router
-from app.users.routes import router as users_router
+from app.auth.auth_routes import router as auth_router
+from app.github.github_routes import router as github_router
+from app.projects.projects_routes import router as projects_router
+from app.scans.scans_routes import router as scans_router
+from app.scan_visualization.scan_visualization_routes import router as scan_visualization_router
+from app.overview.overview_routes import router as overview_router
+from app.files.files_routes import router as files_router
+from app.users.users_routes import router as users_router
 from app.utils.response import ApiResponse
 
 from app.core.database import engine

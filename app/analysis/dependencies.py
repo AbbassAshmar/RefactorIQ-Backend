@@ -6,12 +6,12 @@ from contextlib import contextmanager
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.analysis.repositories.scan_result_repository import ScanResultRepository
+from app.analysis.scan_result_repository import ScanResultRepository
 from app.analysis.services.scan_engine.pipeline.scan_workspace import (
     ScanWorkspaceService,
 )
 from app.analysis.services.scan_engine.pipeline.code_embedding_service import CodeEmbeddingService
-from app.analysis.services.scan_engine.scan_engine import ScanEngineService
+from app.analysis.services.scan_engine.scan_engine_service import ScanEngineService
 from app.config import settings
 from app.core.database import SessionLocal, get_db
 from app.dependencies import (
@@ -21,13 +21,13 @@ from app.dependencies import (
     build_user_service,
 )
 from app.github.dependencies import get_github_service
-from app.github.services.client_service import GithubClientService
-from app.github.services.service import GithubService
-from app.scans.repositories.scan_repository import ScanRepository
-from app.scans.services.scan_service import ScanService
+from app.github.services.github_client_service import GithubClientService
+from app.github.services.github_service import GithubService
+from app.scans.scans_repository import ScanRepository
+from app.scans.scans_service import ScanService
 from app.scans.dependencies import get_scan_service
 from app.scan_visualization.dependencies import get_scan_visualization_repository
-from app.scan_visualization.repository import ScanVisualizationRepository
+from app.scan_visualization.scan_visualization_repository import ScanVisualizationRepository
 
 from app.analysis.services.scan_engine.pipeline.layers.architecture_analysis_layer import ArchitectureAnalysisLayer
 from app.analysis.services.scan_engine.pipeline.layers.decision_analysis_layer import DecisionAnalysisLayer

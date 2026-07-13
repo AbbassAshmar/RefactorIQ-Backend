@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.core.enums import ScanStatus, UserRole
 from app.models import Project, Role, Scan, User
-from app.scans.repositories.scan_repository import ScanRepository
+from app.scans.scans_repository import ScanRepository
 
 
 def test_scan_status_updates_started_and_finished_timestamps(db_session):

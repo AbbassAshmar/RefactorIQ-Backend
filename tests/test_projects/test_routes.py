@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 from app.core.route_dependencies import get_current_payload
 from app.dependencies import get_user_service
 from app.projects.dependencies import get_project_service
-from app.schemas.auth import TokenPayload
-from app.schemas.project import ProjectCreate, ProjectResponse
+from app.auth.auth_dtos import TokenPayload
+from app.projects.projects_dtos import ProjectCreate, ProjectResponse
 
 
 def test_create_project_unauthenticated(client: TestClient):

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 
 from app.config import settings
-from app.schemas.auth import TokenPayload
+from app.auth.auth_dtos import TokenPayload
 
 
 class JWTService:

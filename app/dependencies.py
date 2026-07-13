@@ -8,8 +8,8 @@ from app.auth.services.jwt_service import JWTService
 from app.auth.services.oauth_service import OAuthService
 from app.core.database import get_db
 from app.users.repositories.role_repository import RoleRepository
-from app.users.repositories.repository import UserRepository
-from app.users.services.service import UserService
+from app.users.repositories.user_repository import UserRepository
+from app.users.users_service import UserService
 from app.queues.scans_queue_service import ScansQueueService
 
 

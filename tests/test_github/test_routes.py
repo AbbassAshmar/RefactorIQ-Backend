@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 
 from app.core.route_dependencies import get_current_payload
 from app.github.dependencies import get_github_service
-from app.schemas.auth import TokenPayload
-from app.schemas.github import GithubBranchResponse, GithubRepositoryResponse
+from app.auth.auth_dtos import TokenPayload
+from app.github.github_dtos import GithubBranchResponse, GithubRepositoryResponse
 
 
 def test_get_repositories_unauthenticated(client: TestClient):

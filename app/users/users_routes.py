@@ -1,0 +1,73 @@
+"""User management routes (controllers).
+
+All endpoints require the ``manage-users`` permission (admins only).
+
+* ``GET    /users``          – paginated user list
+* ``GET    /users/{user_id}`` – single user
+* ``PATCH  /users/{user_id}`` – update user
+* ``DELETE /users/{user_id}`` – delete user
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, Depends, Query
+
+from app.core.enums import UserRole
+from app.dependencies import get_user_service
+from app.auth.auth_dtos import TokenPayload
+from app.users.users_dtos import UserUpdate
+from app.users.users_service import UserService
+from app.utils.response import ApiResponse
+from app.core.route_dependencies import require_permissions
+
+
+router = APIRouter(prefix="/users", tags=["Users"])
+
+
+@router.get("/")
+def list_users(
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    role: UserRole | None = None,
+    user_service: UserService = Depends(get_user_service),
+    payload: TokenPayload = Depends(require_permissions("manage-users")),
+):
+    user_service.get_user(uuid.UUID(payload.sub))
+    data = user_service.list_users(page=page, size=size, role=role)
+    return ApiResponse.success(data=data.model_dump())
+
+
+@router.get("/{user_id}")
+def get_user(
+    user_id: uuid.UUID,
+    user_service: UserService = Depends(get_user_service),
+    payload: TokenPayload = Depends(require_permissions(["manage-users"])),
+):
+    user_service.get_user(uuid.UUID(payload.sub))
+    data = user_service.get_user(user_id)
+    return ApiResponse.success(data=data.model_dump())
+
+
+@router.patch("/{user_id}")
+def update_user(
+    user_id: uuid.UUID,
+    body: UserUpdate,
+    user_service: UserService = Depends(get_user_service),
+    payload: TokenPayload = Depends(require_permissions(["manage-users"])),
+):
+    user_service.get_user(uuid.UUID(payload.sub))
+    data = user_service.update_user(user_id, body)
+    return ApiResponse.success(data=data.model_dump())
+
+
+@router.delete("/{user_id}")
+def delete_user(
+    user_id: uuid.UUID,
+    user_service: UserService = Depends(get_user_service),
+    payload: TokenPayload = Depends(require_permissions(["manage-users"])),
+):
+    user_service.get_user(uuid.UUID(payload.sub))
+    user_service.delete_user(user_id)
+    return ApiResponse.success(data={"message": "User deleted successfully"})

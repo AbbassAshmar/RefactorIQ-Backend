@@ -7,6 +7,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from passlib.context import CryptContext
 
 from app.config import settings
+from app.core.constants import AES_GCM_NONCE_SIZE, AES_GCM_PREFIX
 
 # ── Password hashing ─────────────────────────────────────────
 
@@ -23,8 +24,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 # ── Token encryption (GitHub access tokens) ─────────────────
 
-AES_GCM_PREFIX = "aesgcm:v1:"
-AES_GCM_NONCE_SIZE = 12
 
 
 def _decode_base64_key(value: str) -> bytes:

@@ -10,7 +10,7 @@ from starlette.responses import Response
 from starlette.routing import Match
 
 from app.auth.services.jwt_service import JWTService
-from app.auth.utils import COOKIE_NAME
+from app.core.constants import COOKIE_NAME
 from app.core.database import SessionLocal
 from app.dependencies import (
     build_auth_service,

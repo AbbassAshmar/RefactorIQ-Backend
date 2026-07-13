@@ -4,8 +4,8 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.scan_visualization.repository import ScanVisualizationRepository
-from app.scan_visualization.service import ScanVisualizationService
+from app.scan_visualization.scan_visualization_repository import ScanVisualizationRepository
+from app.scan_visualization.scan_visualization_service import ScanVisualizationService
 
 
 def get_scan_visualization_repository(

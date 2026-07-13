@@ -4,8 +4,8 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.projects.repositories.repository import ProjectRepository
-from app.projects.services.service import ProjectService
+from app.projects.projects_repository import ProjectRepository
+from app.projects.projects_service import ProjectService
 
 
 def get_project_repository(db: Session = Depends(get_db)) -> ProjectRepository:

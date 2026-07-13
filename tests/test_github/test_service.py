@@ -3,8 +3,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from app.github.services import service as github_service_module
-from app.github.services.service import GithubService
+from app.github.services import github_service as github_service_module
+from app.github.services.github_service import GithubService
 
 
 def test_clone_repository_keeps_branch_but_does_not_use_shallow_depth(

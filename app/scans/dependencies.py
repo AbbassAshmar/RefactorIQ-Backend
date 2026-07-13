@@ -8,8 +8,8 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
-from app.scans.repositories.scan_repository import ScanRepository
-from app.scans.services.scan_service import ScanService
+from app.scans.scans_repository import ScanRepository
+from app.scans.scans_service import ScanService
 
 from app.queues.scans_queue_service import ScansQueueService
 from app.dependencies import get_scans_queue_service
