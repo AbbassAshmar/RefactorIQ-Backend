@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from pathlib import PurePosixPath
 from typing import Any
 
+from app.ai_explanations.ai_explanations_dtos import AiExplanationType
+from app.ai_explanations.ai_explanations_service import AiExplanationService
 from app.core.exceptions.domain_exceptions import EntityNotFoundError, ExternalDependencyError, PersistenceError
 from app.core.exceptions.repository_exceptions import DatabaseOperationException, RecordNotFoundException
 from app.core.constants import (
@@ -32,9 +34,15 @@ from app.utils.llm_provider import LlmProvider
 
 
 class OverviewService:
-    def __init__(self, repository: OverviewRepository, summary_provider: LlmProvider | None = None) -> None:
+    def __init__(
+        self,
+        repository: OverviewRepository,
+        summary_provider: LlmProvider | None = None,
+        ai_explanation_service: AiExplanationService | None = None,
+    ) -> None:
         self._repository = repository
         self._summary_provider = summary_provider
+        self._ai_explanation_service = ai_explanation_service
 
     def risk_trend(self, user_id: uuid.UUID, scan_id: uuid.UUID) -> RiskTrendResponse:
         try:
@@ -144,7 +152,7 @@ class OverviewService:
                     priority_directories=[],
                 )
 
-            if self._summary_provider is None:
+            if self._summary_provider is None and self._ai_explanation_service is None:
                 raise ExternalDependencyError("AI summary provider is not configured")
 
             context = json.dumps(
@@ -152,8 +160,15 @@ class OverviewService:
                 default=str,
                 sort_keys=True,
             )
-            raw_insight = self._summary_provider.generate(
-                DIRECTORY_INSIGHT_PROMPT.format(context=context)
+            prompt = DIRECTORY_INSIGHT_PROMPT.format(context=context)
+            raw_insight = (
+                self._ai_explanation_service.get_or_generate_for_scan(
+                    scan_id,
+                    AiExplanationType.DIRECTORIES_INSIGHT,
+                    prompt,
+                )
+                if self._ai_explanation_service is not None
+                else self._summary_provider.generate(prompt)
             )
             return self._parse_directory_insight(raw_insight, scan_id)
         except RecordNotFoundException as exc:

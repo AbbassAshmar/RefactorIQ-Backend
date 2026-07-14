@@ -20,6 +20,7 @@ from app.scans.scans_dtos import (
     ScanProjectUserResponse,
     ScanResponse,
 )
+from app.models import ScanFile
 from app.models.models import Project, User
 from app.core.enums import ScanStatus
 
@@ -194,6 +195,115 @@ class ScanRepository:
                     "project_id": str(project_id),
                     "user_id": str(user_id),
                 },
+            ) from exc
+
+    def count_project_scans_by_status(
+        self,
+        *,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+    ) -> dict[ScanStatus, int]:
+        try:
+            statement = (
+                select(Scan.status, func.count(Scan.id))
+                .join(Project, Scan.project_id == Project.id)
+                .where(Project.id == project_id, Project.user_id == user_id)
+                .group_by(Scan.status)
+            )
+            return {
+                status if isinstance(status, ScanStatus) else ScanStatus(status): int(count)
+                for status, count in self._db.execute(statement).all()
+            }
+        except (SQLAlchemyError, ValueError) as exc:
+            logger.exception(
+                "Failed to count project scan statuses user_id=%s project_id=%s",
+                user_id,
+                project_id,
+            )
+            raise DatabaseOperationException(
+                "Failed to count project scan statuses",
+                details={"project_id": str(project_id)},
+            ) from exc
+
+    def list_project_risk_trend(
+        self,
+        *,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+        limit: int,
+    ) -> list[tuple[uuid.UUID, datetime, float]]:
+        try:
+            statement = (
+                select(
+                    Scan.id,
+                    Scan.finished_at,
+                    func.coalesce(func.avg(ScanFile.refactor_score), 0.0),
+                )
+                .join(Project, Scan.project_id == Project.id)
+                .outerjoin(ScanFile, ScanFile.scan_id == Scan.id)
+                .where(
+                    Project.id == project_id,
+                    Project.user_id == user_id,
+                    Scan.status == ScanStatus.SUCCEEDED,
+                    Scan.finished_at.is_not(None),
+                )
+                .group_by(Scan.id, Scan.finished_at)
+                .order_by(Scan.finished_at.desc(), Scan.id.desc())
+                .limit(limit)
+            )
+            rows = self._db.execute(statement).all()
+            return sorted(
+                [(row[0], row[1], float(row[2] or 0.0)) for row in rows],
+                key=lambda row: (row[1], row[0]),
+            )
+        except SQLAlchemyError as exc:
+            logger.exception(
+                "Failed to build project risk trend user_id=%s project_id=%s",
+                user_id,
+                project_id,
+            )
+            raise DatabaseOperationException(
+                "Failed to build project risk trend",
+                details={"project_id": str(project_id)},
+            ) from exc
+
+    def list_project_scan_durations(
+        self,
+        *,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+        limit: int,
+    ) -> list[tuple[uuid.UUID, ScanStatus, datetime, datetime]]:
+        try:
+            statement = (
+                select(Scan.id, Scan.status, Scan.started_at, Scan.finished_at)
+                .join(Project, Scan.project_id == Project.id)
+                .where(
+                    Project.id == project_id,
+                    Project.user_id == user_id,
+                    Scan.status.in_(
+                        [ScanStatus.SUCCEEDED, ScanStatus.FAILED, ScanStatus.CANCELLED]
+                    ),
+                    Scan.started_at.is_not(None),
+                    Scan.finished_at.is_not(None),
+                )
+                .order_by(Scan.finished_at.desc(), Scan.id.desc())
+                .limit(limit)
+            )
+            rows = self._db.execute(statement).all()
+            return sorted(
+                [(row[0], row[1], row[2], row[3]) for row in rows],
+                key=lambda row: (row[3], row[0]),
+            )
+        except SQLAlchemyError as exc:
+            logger.exception(
+                "Failed to build project duration trend user_id=%s project_id=%s",
+                user_id,
+                project_id,
+            )
+            raise DatabaseOperationException(
+                "Failed to build project duration trend",
+                details={"project_id": str(project_id)},
             ) from exc
 
     def list_admin_scans(

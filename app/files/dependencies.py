@@ -3,26 +3,20 @@ from __future__ import annotations
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.ai_explanations.ai_explanations_service import AiExplanationService
+from app.ai_explanations.dependencies import get_ai_explanation_service, get_llm_provider
 from app.core.database import get_db
 from app.files.files_repository import FileRepository
 from app.files.files_service import FileService
-from app.utils.llm_provider import GeminiLlmProvider, LlmProvider
+from app.utils.llm_provider import LlmProvider
 
 
 def get_file_repository(db: Session = Depends(get_db)) -> FileRepository:
     return FileRepository(db)
 
 
-def get_llm_provider() -> LlmProvider:
-    return GeminiLlmProvider(
-        api_key=settings.GEMINI_API_KEY,
-        model=settings.GEMINI_MODEL,
-    )
-
-
 def get_file_service(
     repository: FileRepository = Depends(get_file_repository),
-    summary_provider: LlmProvider = Depends(get_llm_provider),
+    ai_explanation_service: AiExplanationService = Depends(get_ai_explanation_service),
 ) -> FileService:
-    return FileService(repository, summary_provider)
+    return FileService(repository, ai_explanation_service=ai_explanation_service)

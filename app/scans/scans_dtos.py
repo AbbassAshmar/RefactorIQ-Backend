@@ -161,6 +161,35 @@ class ScanStatusDistributionResponse(BaseModel):
     statuses: list[ScanStatusCount]
 
 
+class ScanStatusCountsResponse(BaseModel):
+    total: int
+    succeeded: int
+    pending: int
+    failed: int
+    running: int
+
+
+class ScanRiskTrendPoint(BaseModel):
+    scan_id: uuid.UUID
+    finished_at: datetime
+    average_score: float
+
+
+class ScanRiskTrendResponse(BaseModel):
+    series: list[ScanRiskTrendPoint]
+
+
+class ScanDurationPoint(BaseModel):
+    scan_id: uuid.UUID
+    status: ScanStatus
+    finished_at: datetime
+    duration_seconds: float
+
+
+class ScanDurationTrendResponse(BaseModel):
+    series: list[ScanDurationPoint]
+
+
 class FailedScanProject(BaseModel):
     id: uuid.UUID
     name: str

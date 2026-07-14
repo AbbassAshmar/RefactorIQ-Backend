@@ -88,6 +88,68 @@ def test_admin_projects_sort_by_count_duration_and_owner(db_session):
     assert [row.owner_username for row in owner_rows[:2]] == ["Alpha", "Alpha"]
 
 
+def test_user_project_list_derives_status_from_scans(db_session):
+    role = Role(name=UserRole.CLIENT)
+    user = User(email="client@example.com", username="client", role=role)
+    running_project = Project(
+        name="Running",
+        repo_owner="org",
+        repo_name="running",
+        branch="main",
+        user=user,
+    )
+    latest_status_project = Project(
+        name="Latest Status",
+        repo_owner="org",
+        repo_name="latest-status",
+        branch="main",
+        user=user,
+    )
+    empty_project = Project(
+        name="Empty",
+        repo_owner="org",
+        repo_name="empty",
+        branch="main",
+        user=user,
+    )
+    start = datetime(2026, 7, 13, tzinfo=timezone.utc)
+    running_project.scans = [
+        Scan(
+            status=ScanStatus.RUNNING,
+            created_at=start,
+            updated_at=start,
+        ),
+        Scan(
+            status=ScanStatus.FAILED,
+            created_at=start + timedelta(minutes=1),
+            updated_at=start + timedelta(minutes=1),
+        ),
+    ]
+    latest_status_project.scans = [
+        Scan(
+            status=ScanStatus.SUCCEEDED,
+            created_at=start,
+            updated_at=start,
+        ),
+        Scan(
+            status=ScanStatus.FAILED,
+            created_at=start + timedelta(minutes=1),
+            updated_at=start + timedelta(minutes=1),
+        ),
+    ]
+    db_session.add_all([running_project, latest_status_project, empty_project])
+    db_session.commit()
+
+    projects = ProjectRepository(db_session).list_by_user_id(user.id)
+    statuses = {project.name: project.status for project in projects}
+
+    assert statuses == {
+        "Running": ScanStatus.RUNNING,
+        "Latest Status": ScanStatus.FAILED,
+        "Empty": None,
+    }
+
+
 def test_admin_projects_route_paginates_and_passes_sort_filters(client: TestClient):
     now = datetime.now(timezone.utc)
     item = AdminProjectResponse(

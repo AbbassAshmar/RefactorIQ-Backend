@@ -1,7 +1,7 @@
 """User and role DTOs."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
@@ -38,6 +38,15 @@ class UserResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserTimelinePoint(BaseModel):
+    date: date
+    count: int
+
+
+class UserTimelineResponse(BaseModel):
+    points: list[UserTimelinePoint]
 
 
 class UserInternal(BaseModel):

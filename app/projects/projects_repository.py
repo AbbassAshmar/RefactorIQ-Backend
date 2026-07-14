@@ -12,11 +12,13 @@ from app.core.exceptions.repository_exceptions import (
     DuplicateRecordException,
     RecordNotFoundException,
 )
+from app.core.enums import ScanStatus
 from app.models import Project, Scan, User
 from app.projects.projects_dtos import (
     AdminProjectListFilters,
     AdminProjectRow,
     ProjectCreate,
+    ProjectListResponse,
     ProjectResponse,
 )
 
@@ -59,15 +61,36 @@ class ProjectRepository:
             self._db.rollback()
             raise DatabaseOperationException("Failed to create project") from exc
 
-    def list_by_user_id(self, user_id: uuid.UUID) -> list[ProjectResponse]:
+    def list_by_user_id(self, user_id: uuid.UUID) -> list[ProjectListResponse]:
         try:
+            latest_scan_status = (
+                select(Scan.status)
+                .where(Scan.project_id == Project.id)
+                .order_by(Scan.created_at.desc(), Scan.id.desc())
+                .limit(1)
+                .scalar_subquery()
+            )
+            running_scan_exists = select(Scan.id).where(
+                Scan.project_id == Project.id,
+                Scan.status == ScanStatus.RUNNING,
+            ).exists()
+            project_status = case(
+                (running_scan_exists, ScanStatus.RUNNING),
+                else_=latest_scan_status,
+            ).label("status")
             stmt = (
-                select(Project)
+                select(Project, project_status)
                 .where(Project.user_id == user_id)
                 .order_by(Project.created_at.desc())
             )
-            projects = self._db.execute(stmt).scalars().all()
-            return [self._to_response(project) for project in projects]
+            projects = self._db.execute(stmt).all()
+            return [
+                ProjectListResponse(
+                    **self._to_response(project).model_dump(),
+                    status=status,
+                )
+                for project, status in projects
+            ]
         except SQLAlchemyError as exc:
             raise DatabaseOperationException(
                 "Failed to list user projects",
@@ -128,6 +151,24 @@ class ProjectRepository:
         except SQLAlchemyError as exc:
             raise DatabaseOperationException("Failed to count projects") from exc
 
+    def list_created_at_between(
+        self,
+        *,
+        created_from: datetime,
+        created_before: datetime,
+    ) -> list[datetime]:
+        try:
+            statement = (
+                select(Project.created_at)
+                .where(
+                    Project.created_at >= created_from,
+                    Project.created_at < created_before,
+                )
+            )
+            return list(self._db.execute(statement).scalars().all())
+        except SQLAlchemyError as exc:
+            raise DatabaseOperationException("Failed to aggregate projects over time") from exc
+
     def list_admin_projects(
         self,
         filters: AdminProjectListFilters,
@@ -150,6 +191,10 @@ class ProjectRepository:
             scan_count = func.count(Scan.id)
             average_duration = func.avg(duration_seconds)
 
+            conditions = []
+            if filters.query and filters.query.strip():
+                conditions.append(Project.name.ilike(f"%{filters.query.strip()}%"))
+
             statement = (
                 select(
                     Project.id,
@@ -168,6 +213,7 @@ class ProjectRepository:
                 )
                 .join(User, Project.user_id == User.id)
                 .outerjoin(Scan, Scan.project_id == Project.id)
+                .where(*conditions)
                 .group_by(
                     Project.id,
                     Project.user_id,
@@ -210,7 +256,10 @@ class ProjectRepository:
             )
 
             total = int(
-                self._db.execute(select(func.count(Project.id))).scalar_one() or 0
+                self._db.execute(
+                    select(func.count(Project.id)).where(*conditions)
+                ).scalar_one()
+                or 0
             )
             rows = self._db.execute(statement).all()
             return (
@@ -242,5 +291,6 @@ class ProjectRepository:
                 details={
                     "sort_by": filters.sort_by,
                     "sort_order": filters.sort_order,
+                    "query": filters.query,
                 },
             ) from exc

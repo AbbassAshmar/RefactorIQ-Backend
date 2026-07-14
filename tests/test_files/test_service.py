@@ -3,7 +3,13 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from app.files.files_dtos import CircularDependencyRow, FileDetailRow, FileListRow, FileRelationshipRow
+from app.files.files_dtos import (
+    CircularDependencyRow,
+    DependencyEdgeRow,
+    FileDetailRow,
+    FileListRow,
+    FileRelationshipRow,
+)
 from app.files.files_service import FileService
 
 
@@ -52,6 +58,27 @@ class FakeFileRepository:
     def references_by_paths(self, scan_id, file_paths):
         return {}
 
+    def list_scan_dependency_graph(self, user_id, scan_id):
+        return (
+            [
+                FileListRow(self.dependency.id, self.dependency.file_path, self.dependency.priority_band),
+                FileListRow(self.file.id, self.file.file_path, self.file.priority_band),
+            ],
+            [DependencyEdgeRow(self.file.id, self.dependency.id)],
+        )
+
+    def list_scan_circular_dependencies(self, user_id, scan_id):
+        return [
+            CircularDependencyRow(
+                uuid.uuid4(),
+                2,
+                [
+                    FileListRow(self.dependency.id, self.dependency.file_path, 'medium'),
+                    FileListRow(self.file.id, self.file.file_path, 'high'),
+                ],
+            )
+        ]
+
 
 class FakeSummaryProvider:
     def __init__(self) -> None:
@@ -90,3 +117,27 @@ def test_file_details_only_generate_summaries_when_requested():
     assert with_summary.summaries.architectural == 'Generated summary'
     assert len(provider.prompts) == 2
     assert with_summary.dependencies[0].metrics['architecture_analysis']['fan_in'] == 1
+
+
+def test_file_service_returns_scan_dependency_graph_and_circular_groups():
+    repository = FakeFileRepository()
+    service = FileService(repository, FakeSummaryProvider())
+    user_id = uuid.uuid4()
+
+    graph = service.list_scan_dependencies(user_id, repository.scan_id)
+    cycles = service.list_scan_circular_dependencies(user_id, repository.scan_id)
+
+    assert graph.scan_id == repository.scan_id
+    assert [node.file_path for node in graph.nodes] == [
+        'src/core/dependency.py',
+        'src/core/service.py',
+    ]
+    assert graph.edges[0].model_dump() == {
+        'source_file_id': repository.file.id,
+        'target_file_id': repository.dependency.id,
+    }
+    assert cycles.circular_dependencies[0].size == 2
+    assert [member.file_path for member in cycles.circular_dependencies[0].members] == [
+        'src/core/dependency.py',
+        'src/core/service.py',
+    ]

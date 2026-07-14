@@ -209,6 +209,7 @@ class UserRepository:
         page: int = 1,
         size: int = 20,
         role: UserRole | None = None,
+        query: str | None = None,
     ) -> tuple[list[UserInternal], int]:
         """Return a page of users and the total count."""
         try:
@@ -220,6 +221,10 @@ class UserRepository:
                 count_stmt = count_stmt.join(Role, User.role_id == Role.id).where(
                     Role.name == role.value
                 )
+            if query:
+                search = f"%{query.strip()}%"
+                base = base.where(User.username.ilike(search))
+                count_stmt = count_stmt.where(User.username.ilike(search))
 
             total: int = self._db.execute(count_stmt).scalar() or 0
 
@@ -249,6 +254,24 @@ class UserRepository:
             return int(self._db.execute(statement).scalar_one() or 0)
         except SQLAlchemyError as exc:
             raise DatabaseOperationException("Failed to count users") from exc
+
+    def list_created_at_between(
+        self,
+        *,
+        created_from: datetime,
+        created_before: datetime,
+    ) -> list[datetime]:
+        try:
+            statement = (
+                select(User.created_at)
+                .where(
+                    User.created_at >= created_from,
+                    User.created_at < created_before,
+                )
+            )
+            return list(self._db.execute(statement).scalars().all())
+        except SQLAlchemyError as exc:
+            raise DatabaseOperationException("Failed to aggregate users over time") from exc
 
 
     def update_github_token(

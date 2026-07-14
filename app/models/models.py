@@ -8,7 +8,7 @@ from sqlalchemy import BigInteger, Boolean, CheckConstraint, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-from app.core.enums import UserRole, ScanStatus
+from app.core.enums import UserRole, ScanStatus, RefactorQueueStatus
 from app.models.base import Base, TimestampMixin, UUIDMixin
 from datetime import datetime
 
@@ -109,6 +109,12 @@ class Project(UUIDMixin, TimestampMixin, Base):
         cascade="all, delete-orphan"
     )
 
+    refactor_queue_items: Mapped[list["RefactorQueueItem"]] = relationship(
+        "RefactorQueueItem",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+
     __table_args__ = (
         UniqueConstraint(
             "user_id",
@@ -120,6 +126,36 @@ class Project(UUIDMixin, TimestampMixin, Base):
     )
     def __repr__(self) -> str:
         return f"<Project {self.name} owner={self.repo_owner} repo={self.repo_name} branch={self.branch} user_id={self.user_id}>"
+
+
+class RefactorQueueItem(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "refactor_queue_items"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[RefactorQueueStatus] = mapped_column(
+        Enum(
+            RefactorQueueStatus,
+            name="refactor_queue_status_enum",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
+        default=RefactorQueueStatus.PENDING,
+        server_default=text(f"'{RefactorQueueStatus.PENDING.value}'"),
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+
+    project: Mapped["Project"] = relationship("Project", back_populates="refactor_queue_items")
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "file_path", name="uq_refactor_queue_project_file_path"),
+        Index("ix_refactor_queue_project_status_position", "project_id", "status", "position"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RefactorQueueItem project_id={self.project_id} file_path={self.file_path} status={self.status}>"
 
 
 class Scan(UUIDMixin, TimestampMixin, Base):
@@ -212,6 +248,38 @@ class ScanFile(UUIDMixin, Base):
 
     def __repr__(self) -> str:
         return f"<ScanFile scan_id={self.scan_id} file_path={self.file_path}>"
+
+
+class AiExplanation(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "ai_explanations"
+
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("files.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    scan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("scans.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(file_id IS NOT NULL AND scan_id IS NULL) OR "
+            "(file_id IS NULL AND scan_id IS NOT NULL)",
+            name="ck_ai_explanations_single_parent",
+        ),
+        UniqueConstraint("file_id", "type", name="uq_ai_explanations_file_type"),
+        UniqueConstraint("scan_id", "type", name="uq_ai_explanations_scan_type"),
+        Index("ix_ai_explanations_file_id", "file_id"),
+        Index("ix_ai_explanations_scan_id", "scan_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AiExplanation type={self.type} file_id={self.file_id} scan_id={self.scan_id}>"
 
 
 class DependencyEdge(Base):

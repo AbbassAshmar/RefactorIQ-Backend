@@ -8,6 +8,7 @@ Pydantic schemas.
 from __future__ import annotations
 
 import uuid
+from datetime import date, datetime, time, timezone
 
 from app.core.enums import UserRole
 from app.core.exceptions.domain_exceptions import (
@@ -22,7 +23,14 @@ from app.core.exceptions.repository_exceptions import (
 )
 from app.core.security import hash_password
 from app.core.common_dtos import PaginatedResponse
-from app.users.users_dtos import UserCreate, UserInternal, UserResponse, UserUpdate
+from app.users.users_dtos import (
+    UserCreate,
+    UserInternal,
+    UserResponse,
+    UserTimelinePoint,
+    UserTimelineResponse,
+    UserUpdate,
+)
 from app.users.repositories.role_repository import RoleRepository
 from app.users.repositories.user_repository import UserRepository
 
@@ -57,9 +65,15 @@ class UserService:
         page: int = 1,
         size: int = 20,
         role: UserRole | None = None,
+        query: str | None = None,
     ) -> PaginatedResponse[UserResponse]:
         try:
-            users, total = self._repo.list_users(page=page, size=size, role=role)
+            users, total = self._repo.list_users(
+                page=page,
+                size=size,
+                role=role,
+                query=query,
+            )
             items = [UserResponse.model_validate(u.model_dump()) for u in users]
             pages = (total + size - 1) // size if size else 0
             return PaginatedResponse(
@@ -67,6 +81,55 @@ class UserService:
             )
         except DatabaseOperationException as exc:
             raise PersistenceError("Unable to list users") from exc
+
+    def get_users_over_time(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> UserTimelineResponse:
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        else:
+            current = current.astimezone(timezone.utc)
+
+        current_month = date(current.year, current.month, 1)
+        start_month = self._shift_month(current_month, -14)
+        next_month = self._shift_month(current_month, 1)
+        created_from = datetime.combine(start_month, time.min, tzinfo=timezone.utc)
+        created_before = datetime.combine(next_month, time.min, tzinfo=timezone.utc)
+
+        try:
+            users = self._repo.list_created_at_between(
+                created_from=created_from,
+                created_before=created_before,
+            )
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to load users over time") from exc
+
+        counts = {self._shift_month(start_month, offset): 0 for offset in range(15)}
+        for created_at in users:
+            created = (
+                created_at.replace(tzinfo=timezone.utc)
+                if created_at.tzinfo is None
+                else created_at.astimezone(timezone.utc)
+            )
+            month = date(created.year, created.month, 1)
+            if month in counts:
+                counts[month] += 1
+
+        return UserTimelineResponse(
+            points=[
+                UserTimelinePoint(date=month, count=counts[month])
+                for month in counts
+            ]
+        )
+
+    @staticmethod
+    def _shift_month(month: date, offset: int) -> date:
+        month_index = month.year * 12 + month.month - 1 + offset
+        year, zero_based_month = divmod(month_index, 12)
+        return date(year, zero_based_month + 1, 1)
 
     def create_admin(
         self, email: str, full_name: str, password: str

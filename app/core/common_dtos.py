@@ -31,6 +31,7 @@ class PaginationMeta(BaseModel):
 
 
 class ResponseMeta(BaseModel):
+    project_id: Optional[UUID] = None
     pagination: Optional[PaginationMeta] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     request_id: Optional[str] = None

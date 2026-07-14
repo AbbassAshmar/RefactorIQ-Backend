@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date, datetime, time, timezone
 
 from app.core.exceptions.domain_exceptions import (
     ConflictError,
@@ -18,7 +19,10 @@ from app.projects.projects_dtos import (
     AdminProjectListResult,
     AdminProjectOwner,
     AdminProjectResponse,
+    ProjectTimelinePoint,
+    ProjectTimelineResponse,
     ProjectCreate,
+    ProjectListResponse,
     ProjectResponse,
 )
 
@@ -35,7 +39,7 @@ class ProjectService:
         except DatabaseOperationException as exc:
             raise PersistenceError("Unable to create project") from exc
 
-    def list_user_projects(self, user_id: uuid.UUID) -> list[ProjectResponse]:
+    def list_user_projects(self, user_id: uuid.UUID) -> list[ProjectListResponse]:
         try:
             return self._repo.list_by_user_id(user_id)
         except DatabaseOperationException as exc:
@@ -89,3 +93,52 @@ class ProjectService:
             ],
             total_count=total_count,
         )
+
+    def get_projects_over_time(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> ProjectTimelineResponse:
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        else:
+            current = current.astimezone(timezone.utc)
+
+        current_month = date(current.year, current.month, 1)
+        start_month = self._shift_month(current_month, -14)
+        next_month = self._shift_month(current_month, 1)
+        created_from = datetime.combine(start_month, time.min, tzinfo=timezone.utc)
+        created_before = datetime.combine(next_month, time.min, tzinfo=timezone.utc)
+
+        try:
+            projects = self._repo.list_created_at_between(
+                created_from=created_from,
+                created_before=created_before,
+            )
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to load projects over time") from exc
+
+        counts = {self._shift_month(start_month, offset): 0 for offset in range(15)}
+        for created_at in projects:
+            created = (
+                created_at.replace(tzinfo=timezone.utc)
+                if created_at.tzinfo is None
+                else created_at.astimezone(timezone.utc)
+            )
+            month = date(created.year, created.month, 1)
+            if month in counts:
+                counts[month] += 1
+
+        return ProjectTimelineResponse(
+            points=[
+                ProjectTimelinePoint(date=month, count=counts[month])
+                for month in counts
+            ]
+        )
+
+    @staticmethod
+    def _shift_month(month: date, offset: int) -> date:
+        month_index = month.year * 12 + month.month - 1 + offset
+        year, zero_based_month = divmod(month_index, 12)
+        return date(year, zero_based_month + 1, 1)

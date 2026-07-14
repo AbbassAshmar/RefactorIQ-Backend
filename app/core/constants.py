@@ -1,6 +1,7 @@
 """Shared backend constants."""
 
 SCAN_ID_QUERY_PARAM = "scan_id"
+PROJECT_ID_QUERY_PARAM = "project_id"
 INCLUDE_SUMMARY_QUERY_PARAM = "include_summary"
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 COOKIE_NAME = "access_token"
@@ -46,6 +47,7 @@ DIRECTORY_INSIGHT_ENDPOINT = "/overview/directory-insight"
 PRIORITY_BANDS = ("critical", "high", "medium", "low")
 RISKY_PRIORITY_BANDS = frozenset({"critical", "high", "medium"})
 PREVIOUS_TREND_SCAN_COUNT = 3
+SCAN_DASHBOARD_HISTORY_LIMIT = 20
 TOP_REFACTOR_FILE_COUNT = 5
 TOP_DIRECTORY_COUNT = 5
 

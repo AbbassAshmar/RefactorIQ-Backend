@@ -21,8 +21,12 @@ from app.scans.scans_admin_routes import (
 from app.scan_visualization.scan_visualization_routes import router as scan_visualization_router
 from app.overview.overview_routes import router as overview_router
 from app.files.files_routes import router as files_router
-from app.users.users_routes import router as users_router
+from app.users.users_routes import (
+    analytics_router as users_admin_analytics_router,
+    router as users_router,
+)
 from app.analytics.analytics_routes import router as analytics_router
+from app.refactor_queue.refactor_queue_routes import router as refactor_queue_router
 from app.utils.response import ApiResponse
 
 from app.core.database import engine
@@ -89,6 +93,7 @@ register_exception_handlers(app)
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
+app.include_router(users_admin_analytics_router, prefix="/api/v1")
 app.include_router(github_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(projects_admin_router, prefix="/api/v1")
@@ -99,6 +104,7 @@ app.include_router(scan_visualization_router, prefix="/api/v1")
 app.include_router(overview_router, prefix="/api/v1")
 app.include_router(files_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
+app.include_router(refactor_queue_router, prefix="/api/v1")
 
 
 # Health check 

@@ -6,6 +6,7 @@ from datetime import datetime, time, timedelta, timezone
 
 from app.core.exceptions.domain_exceptions import EntityNotFoundError, PersistenceError
 from app.core.exceptions.repository_exceptions import DatabaseOperationException, RecordNotFoundException
+from app.core.constants import SCAN_DASHBOARD_HISTORY_LIMIT
 from app.scans.scans_repository import ScanRepository
 from app.queues.scans_queue_service import ScansQueueService
 from app.scans.scans_dtos import (
@@ -23,6 +24,11 @@ from app.scans.scans_dtos import (
     ScanResponse,
     ScanStatusCount,
     ScanStatusDistributionResponse,
+    ScanStatusCountsResponse,
+    ScanRiskTrendResponse,
+    ScanRiskTrendPoint,
+    ScanDurationTrendResponse,
+    ScanDurationPoint,
     ScanTimelinePoint,
     ScanTimelineResponse,
 )
@@ -193,6 +199,95 @@ class ScanService:
                 for status in ScanStatus
             ]
         )
+
+    def get_project_status_counts(
+        self,
+        *,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+    ) -> ScanStatusCountsResponse:
+        self._ensure_project_access(user_id=user_id, project_id=project_id)
+        try:
+            counts = self.scan_repository.count_project_scans_by_status(
+                user_id=user_id,
+                project_id=project_id,
+            )
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to load project scan status counts") from exc
+
+        return ScanStatusCountsResponse(
+            total=sum(counts.values()),
+            succeeded=counts.get(ScanStatus.SUCCEEDED, 0),
+            pending=counts.get(ScanStatus.PENDING, 0),
+            failed=counts.get(ScanStatus.FAILED, 0),
+            running=counts.get(ScanStatus.RUNNING, 0),
+        )
+
+    def get_project_risk_trend(
+        self,
+        *,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+    ) -> ScanRiskTrendResponse:
+        self._ensure_project_access(user_id=user_id, project_id=project_id)
+        try:
+            rows = self.scan_repository.list_project_risk_trend(
+                user_id=user_id,
+                project_id=project_id,
+                limit=SCAN_DASHBOARD_HISTORY_LIMIT,
+            )
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to load project risk trend") from exc
+
+        return ScanRiskTrendResponse(
+            series=[
+                ScanRiskTrendPoint(
+                    scan_id=scan_id,
+                    finished_at=finished_at,
+                    average_score=round(max(0.0, min(1.0, score)) * 100, 2),
+                )
+                for scan_id, finished_at, score in rows
+            ]
+        )
+
+    def get_project_duration_trend(
+        self,
+        *,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+    ) -> ScanDurationTrendResponse:
+        self._ensure_project_access(user_id=user_id, project_id=project_id)
+        try:
+            rows = self.scan_repository.list_project_scan_durations(
+                user_id=user_id,
+                project_id=project_id,
+                limit=SCAN_DASHBOARD_HISTORY_LIMIT,
+            )
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to load project duration trend") from exc
+
+        return ScanDurationTrendResponse(
+            series=[
+                ScanDurationPoint(
+                    scan_id=scan_id,
+                    status=status,
+                    finished_at=finished_at,
+                    duration_seconds=round(max(0.0, (finished_at - started_at).total_seconds()), 2),
+                )
+                for scan_id, status, started_at, finished_at in rows
+            ]
+        )
+
+    def _ensure_project_access(self, *, user_id: uuid.UUID, project_id: uuid.UUID) -> None:
+        try:
+            owns_project = self.scan_repository.project_belongs_to_user(
+                project_id=project_id,
+                user_id=user_id,
+            )
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to validate project access") from exc
+        if not owns_project:
+            raise EntityNotFoundError("project", project_id)
 
     def list_failed_scans(self, *, limit: int) -> list[FailedScanResponse]:
         try:

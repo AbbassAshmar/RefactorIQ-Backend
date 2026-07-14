@@ -2,10 +2,12 @@
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+from app.core.enums import ScanStatus
 
 
 class ProjectCreate(BaseModel):
@@ -28,6 +30,12 @@ class ProjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ProjectListResponse(ProjectResponse):
+    """Project response with status derived from the project's scans."""
+
+    status: ScanStatus | None = None
+
+
 ProjectSortBy = Literal[
     "created_at",
     "name",
@@ -44,6 +52,16 @@ class AdminProjectListFilters:
     limit: int = 20
     sort_by: ProjectSortBy = "created_at"
     sort_order: ProjectSortOrder = "desc"
+    query: str | None = None
+
+
+class ProjectTimelinePoint(BaseModel):
+    date: date
+    count: int
+
+
+class ProjectTimelineResponse(BaseModel):
+    points: list[ProjectTimelinePoint]
 
 
 @dataclass(frozen=True)

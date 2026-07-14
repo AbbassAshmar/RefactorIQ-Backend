@@ -18,6 +18,20 @@ class FileListRow:
 
 
 @dataclass(frozen=True)
+class PriorityDistributionRow:
+    scan_id: uuid.UUID
+    finished_at: datetime
+    counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class FilesAnalyzedRow:
+    scan_id: uuid.UUID
+    finished_at: datetime
+    file_count: int
+
+
+@dataclass(frozen=True)
 class FileDetailRow:
     id: uuid.UUID
     scan_id: uuid.UUID
@@ -48,6 +62,12 @@ class CircularDependencyRow:
     members: list[FileListRow]
 
 
+@dataclass(frozen=True)
+class DependencyEdgeRow:
+    source_file_id: uuid.UUID
+    target_file_id: uuid.UUID
+
+
 class FileListItem(BaseModel):
     id: uuid.UUID
     file_path: str
@@ -57,6 +77,33 @@ class FileListItem(BaseModel):
 class FileListResponse(BaseModel):
     scan_id: uuid.UUID
     files: list[FileListItem]
+
+
+class PriorityBandCounts(BaseModel):
+    critical: int = 0
+    high: int = 0
+    medium: int = 0
+    low: int = 0
+
+
+class ScanPriorityDistributionPoint(BaseModel):
+    scan_id: uuid.UUID
+    finished_at: datetime
+    priority_counts: PriorityBandCounts
+
+
+class PriorityDistributionTrendResponse(BaseModel):
+    series: list[ScanPriorityDistributionPoint]
+
+
+class FilesAnalyzedPoint(BaseModel):
+    scan_id: uuid.UUID
+    finished_at: datetime
+    files_analyzed: int
+
+
+class FilesAnalyzedTrendResponse(BaseModel):
+    series: list[FilesAnalyzedPoint]
 
 
 class FileReference(BaseModel):
@@ -75,6 +122,26 @@ class CircularDependency(BaseModel):
     group_id: uuid.UUID
     size: int
     members: list[FileReference]
+
+
+class DependencyEdgeReference(BaseModel):
+    source_file_id: uuid.UUID
+    target_file_id: uuid.UUID
+
+
+class DependencyGraphResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scan_id: uuid.UUID
+    nodes: list[FileReference]
+    edges: list[DependencyEdgeReference]
+
+
+class ScanCircularDependenciesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scan_id: uuid.UUID
+    circular_dependencies: list[CircularDependency]
 
 
 class DuplicateMatch(BaseModel):

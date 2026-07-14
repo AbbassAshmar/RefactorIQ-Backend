@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.enums import ScanStatus
 from app.core.common_dtos import PaginationMeta, ResponseMeta
+from app.core.constants import PROJECT_ID_QUERY_PARAM
 from app.scans.scans_dtos import ScanListFilters
 from app.auth.auth_dtos import TokenPayload
 from app.dependencies import get_user_service
@@ -78,6 +79,57 @@ def get_scans_over_time(
             project_id=project_id,
             user_id=user_id,
         ).model_dump()
+    )
+
+
+def _dashboard_user_id(payload: TokenPayload, user_service: UserService) -> uuid.UUID:
+    user_id = uuid.UUID(payload.sub)
+    user_service.get_user(user_id)
+    return user_id
+
+
+@router.get("/scans/analytics/status-counts")
+def get_project_status_counts(
+    project_id: uuid.UUID = Query(..., alias=PROJECT_ID_QUERY_PARAM),
+    payload: TokenPayload = Depends(require_permissions(["view-own-scans"])),
+    user_service: UserService = Depends(get_user_service),
+    scan_service: ScanService = Depends(get_scan_service),
+):
+    user_id = _dashboard_user_id(payload, user_service)
+    response = scan_service.get_project_status_counts(user_id=user_id, project_id=project_id)
+    return ApiResponse.success(
+        data=response.model_dump(),
+        meta=ResponseMeta(project_id=project_id),
+    )
+
+
+@router.get("/scans/analytics/risk-trend")
+def get_project_risk_trend(
+    project_id: uuid.UUID = Query(..., alias=PROJECT_ID_QUERY_PARAM),
+    payload: TokenPayload = Depends(require_permissions(["view-own-scans"])),
+    user_service: UserService = Depends(get_user_service),
+    scan_service: ScanService = Depends(get_scan_service),
+):
+    user_id = _dashboard_user_id(payload, user_service)
+    response = scan_service.get_project_risk_trend(user_id=user_id, project_id=project_id)
+    return ApiResponse.success(
+        data=response.model_dump(),
+        meta=ResponseMeta(project_id=project_id),
+    )
+
+
+@router.get("/scans/analytics/duration-trend")
+def get_project_duration_trend(
+    project_id: uuid.UUID = Query(..., alias=PROJECT_ID_QUERY_PARAM),
+    payload: TokenPayload = Depends(require_permissions(["view-own-scans"])),
+    user_service: UserService = Depends(get_user_service),
+    scan_service: ScanService = Depends(get_scan_service),
+):
+    user_id = _dashboard_user_id(payload, user_service)
+    response = scan_service.get_project_duration_trend(user_id=user_id, project_id=project_id)
+    return ApiResponse.success(
+        data=response.model_dump(),
+        meta=ResponseMeta(project_id=project_id),
     )
 
 @router.post("/projects/{project_id}/scans")

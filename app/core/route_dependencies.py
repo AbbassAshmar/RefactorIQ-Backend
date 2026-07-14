@@ -51,6 +51,12 @@ def require_permissions(required_permissions: Iterable[str]):
     Automatically requires authentication first.
     """
 
+    permissions = (
+        [required_permissions]
+        if isinstance(required_permissions, str)
+        else required_permissions
+    )
+
     async def dependency(
         payload: TokenPayload = Depends(get_current_payload),
     ) -> TokenPayload:
@@ -58,7 +64,7 @@ def require_permissions(required_permissions: Iterable[str]):
 
         user_perms = ROLE_PERMISSIONS.get(payload.role, [])
 
-        for perm in required_permissions:
+        for perm in permissions:
             if perm not in user_perms:
                 raise AuthorizationError(
                     f"Permission '{perm}' required"

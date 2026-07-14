@@ -4,6 +4,7 @@ from app.models.models import (
     CircularDependencyMember,
     CoChangeEdge,
     DependencyEdge,
+    AiExplanation,
     Project,
     Permission,
     Role,
@@ -11,6 +12,7 @@ from app.models.models import (
     ScanFile,
     ScanVisualizationRecord,
     User,
+    RefactorQueueItem,
 )
 
 __all__ = [
@@ -25,5 +27,7 @@ __all__ = [
     "CircularDependencyGroup",
     "CircularDependencyMember",
     "CoChangeEdge",
+    "AiExplanation",
     "User",
+    "RefactorQueueItem",
 ]

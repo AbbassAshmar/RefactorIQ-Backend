@@ -24,6 +24,15 @@ from app.core.route_dependencies import require_permissions
 
 
 router = APIRouter(prefix="/users", tags=["Users"])
+analytics_router = APIRouter(prefix="/admin/analytics", tags=["Admin Analytics"])
+
+
+@analytics_router.get("/users-over-time")
+def get_users_over_time(
+    user_service: UserService = Depends(get_user_service),
+    _: TokenPayload = Depends(require_permissions(["view-analytics"])),
+):
+    return ApiResponse.success(data=user_service.get_users_over_time().model_dump())
 
 
 @router.get("/")
@@ -31,11 +40,12 @@ def list_users(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     role: UserRole | None = None,
+    q: str | None = Query(None, max_length=100),
     user_service: UserService = Depends(get_user_service),
-    payload: TokenPayload = Depends(require_permissions("manage-users")),
+    payload: TokenPayload = Depends(require_permissions(["manage-users"])),
 ):
     user_service.get_user(uuid.UUID(payload.sub))
-    data = user_service.list_users(page=page, size=size, role=role)
+    data = user_service.list_users(page=page, size=size, role=role, query=q)
     return ApiResponse.success(data=data.model_dump())
 
 

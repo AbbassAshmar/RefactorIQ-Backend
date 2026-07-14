@@ -24,6 +24,7 @@ router = APIRouter(prefix="/admin/projects", tags=["Admin Projects"])
 def list_admin_projects(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
+    q: str | None = Query(default=None, max_length=100),
     sort_by: ProjectSortBy = "created_at",
     sort_order: ProjectSortOrder = "desc",
     project_service: ProjectService = Depends(get_project_service),
@@ -35,6 +36,7 @@ def list_admin_projects(
             limit=limit,
             sort_by=sort_by,
             sort_order=sort_order,
+            query=q,
         )
     )
     total_pages = math.ceil(result.total_count / limit) if result.total_count else 0
@@ -50,4 +52,14 @@ def list_admin_projects(
                 has_previous_page=page > 1,
             )
         ),
+    )
+
+
+@router.get("/over-time")
+def get_projects_over_time(
+    project_service: ProjectService = Depends(get_project_service),
+    _: TokenPayload = Depends(require_permissions(["manage-projects"])),
+):
+    return ApiResponse.success(
+        data=project_service.get_projects_over_time().model_dump()
     )

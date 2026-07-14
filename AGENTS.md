@@ -1,3 +1,5 @@
+Always begin the first response in a new chat with the words `I'm Following AGENTS.MD`.
+
 # Backend Architecture and Development Conventions
 
 This document is the source of truth for future backend work and prompts. New code and refactors must follow these rules unless an explicit decision changes them.
@@ -88,6 +90,23 @@ Each layer uses its own exception vocabulary:
 - `core/middlewares/exceptions_handler.py`: the centralized handler catches known and unexpected exception types and converts them into user-facing HTTP responses.
 
 Repositories should not raise HTTP exceptions. Services should not leak raw SQLAlchemy exceptions. Routes should not contain persistence queries or duplicate exception translation.
+
+## Logging
+
+Logging is required throughout every application layer, not only for incoming HTTP requests. Each route, service, repository, background worker, and substantial pipeline component must declare a module logger with:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+```
+
+- Log operation lifecycle events: when meaningful work starts, important decisions or downstream calls, result counts or identifiers, completion, and elapsed time where useful.
+- Use `INFO` for business-operation start/completion and meaningful outcomes, `DEBUG` for query and decision details, `WARNING` for expected but abnormal conditions, and `ERROR`/`logger.exception` for failures.
+- Repository/database exception handlers must use `logger.exception(...)` before translating the failure so the root stack trace is retained. Higher layers should log translation/context without redundantly emitting the same stack trace.
+- Include safe correlation context such as user, project, scan, task, and file identifiers plus counts and durations. Never log credentials, tokens, cookies, source contents, prompts containing sensitive code, or complete request/response payloads.
+- Keep messages action-oriented and specific about what is happening. Avoid vague messages such as `request failed`, excessive per-row logging, or logs that only repeat the HTTP middleware access line.
+- Logging must preserve the layer boundaries and exception vocabulary described above; it does not replace domain errors, repository errors, or centralized HTTP exception handling.
 
 ## Naming rules
 

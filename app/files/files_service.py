@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 import uuid
 from pathlib import PurePosixPath
 from typing import Any
 
-from app.core.constants import ARCHITECTURAL_SUMMARY_PROMPT, GENERAL_SUMMARY_PROMPT, LANGUAGE_BY_EXTENSION
+from app.ai_explanations.ai_explanations_dtos import AiExplanationType
+from app.ai_explanations.ai_explanations_service import AiExplanationService
+from app.core.constants import (
+    ARCHITECTURAL_SUMMARY_PROMPT,
+    GENERAL_SUMMARY_PROMPT,
+    LANGUAGE_BY_EXTENSION,
+    SCAN_DASHBOARD_HISTORY_LIMIT,
+)
 from app.core.exceptions.domain_exceptions import EntityNotFoundError, ExternalDependencyError, PersistenceError
 from app.core.exceptions.repository_exceptions import DatabaseOperationException, RecordNotFoundException
 from app.files.files_dtos import (
     CircularDependency,
+    DependencyEdgeReference,
+    DependencyGraphResponse,
     DuplicateMatch,
     FileDetailRow,
     FileDetailsResponse,
@@ -20,15 +31,30 @@ from app.files.files_dtos import (
     FileRelationship,
     FileRelationshipRow,
     FileSummaries,
+    ScanCircularDependenciesResponse,
+    FilesAnalyzedPoint,
+    FilesAnalyzedTrendResponse,
+    PriorityBandCounts,
+    PriorityDistributionTrendResponse,
+    ScanPriorityDistributionPoint,
 )
 from app.files.files_repository import FileRepository
 from app.utils.llm_provider import LlmProvider
 
 
+logger = logging.getLogger(__name__)
+
+
 class FileService:
-    def __init__(self, repository: FileRepository, summary_provider: LlmProvider) -> None:
+    def __init__(
+        self,
+        repository: FileRepository,
+        summary_provider: LlmProvider | None = None,
+        ai_explanation_service: AiExplanationService | None = None,
+    ) -> None:
         self._repository = repository
         self._summary_provider = summary_provider
+        self._ai_explanation_service = ai_explanation_service
 
     def list_scan_files(self, user_id: uuid.UUID, scan_id: uuid.UUID) -> FileListResponse:
         try:
@@ -90,6 +116,180 @@ class FileService:
             raise EntityNotFoundError("file", file_id) from exc
         except DatabaseOperationException as exc:
             raise PersistenceError("Unable to load file details") from exc
+
+    def get_project_priority_distribution(
+        self,
+        *,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+    ) -> PriorityDistributionTrendResponse:
+        self._ensure_project_access(user_id=user_id, project_id=project_id)
+        try:
+            rows = self._repository.list_project_priority_distribution(
+                user_id=user_id,
+                project_id=project_id,
+                limit=SCAN_DASHBOARD_HISTORY_LIMIT,
+            )
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to load project priority distribution") from exc
+
+        return PriorityDistributionTrendResponse(
+            series=[
+                ScanPriorityDistributionPoint(
+                    scan_id=row.scan_id,
+                    finished_at=row.finished_at,
+                    priority_counts=PriorityBandCounts(
+                        critical=row.counts.get("critical", 0),
+                        high=row.counts.get("high", 0),
+                        medium=row.counts.get("medium", 0),
+                        low=row.counts.get("low", 0),
+                    ),
+                )
+                for row in rows
+            ]
+        )
+
+    def get_project_files_analyzed(
+        self,
+        *,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+    ) -> FilesAnalyzedTrendResponse:
+        self._ensure_project_access(user_id=user_id, project_id=project_id)
+        try:
+            rows = self._repository.list_project_file_counts(
+                user_id=user_id,
+                project_id=project_id,
+                limit=SCAN_DASHBOARD_HISTORY_LIMIT,
+            )
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to load project files analyzed trend") from exc
+
+        return FilesAnalyzedTrendResponse(
+            series=[
+                FilesAnalyzedPoint(
+                    scan_id=row.scan_id,
+                    finished_at=row.finished_at,
+                    files_analyzed=row.file_count,
+                )
+                for row in rows
+            ]
+        )
+
+    def _ensure_project_access(self, *, user_id: uuid.UUID, project_id: uuid.UUID) -> None:
+        try:
+            owns_project = self._repository.project_belongs_to_user(
+                project_id=project_id,
+                user_id=user_id,
+            )
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to validate project access") from exc
+        if not owns_project:
+            raise EntityNotFoundError("project", project_id)
+
+    def list_scan_dependencies(
+        self,
+        user_id: uuid.UUID,
+        scan_id: uuid.UUID,
+    ) -> DependencyGraphResponse:
+        started_at = time.perf_counter()
+        logger.info("Building dependency graph user_id=%s scan_id=%s", user_id, scan_id)
+        try:
+            nodes, edges = self._repository.list_scan_dependency_graph(user_id, scan_id)
+            logger.debug(
+                "Dependency graph repository data loaded user_id=%s scan_id=%s nodes=%d edges=%d",
+                user_id,
+                scan_id,
+                len(nodes),
+                len(edges),
+            )
+            response = DependencyGraphResponse(
+                scan_id=scan_id,
+                nodes=[self._reference_schema(node) for node in nodes],
+                edges=[
+                    DependencyEdgeReference(
+                        source_file_id=edge.source_file_id,
+                        target_file_id=edge.target_file_id,
+                    )
+                    for edge in edges
+                ],
+            )
+            logger.info(
+                "Built dependency graph user_id=%s scan_id=%s nodes=%d edges=%d duration_ms=%.2f",
+                user_id,
+                scan_id,
+                len(response.nodes),
+                len(response.edges),
+                (time.perf_counter() - started_at) * 1000,
+            )
+            return response
+        except RecordNotFoundException as exc:
+            logger.warning(
+                "Dependency graph scan unavailable user_id=%s scan_id=%s reason=%s",
+                user_id,
+                scan_id,
+                exc,
+            )
+            raise EntityNotFoundError("successful scan", scan_id) from exc
+        except DatabaseOperationException as exc:
+            logger.error(
+                "Dependency graph persistence operation failed user_id=%s scan_id=%s reason=%s",
+                user_id,
+                scan_id,
+                exc,
+            )
+            raise PersistenceError("Unable to load scan dependencies") from exc
+
+    def list_scan_circular_dependencies(
+        self,
+        user_id: uuid.UUID,
+        scan_id: uuid.UUID,
+    ) -> ScanCircularDependenciesResponse:
+        started_at = time.perf_counter()
+        logger.info("Building circular dependencies response user_id=%s scan_id=%s", user_id, scan_id)
+        try:
+            groups = self._repository.list_scan_circular_dependencies(user_id, scan_id)
+            logger.debug(
+                "Circular dependency repository data loaded user_id=%s scan_id=%s groups=%d",
+                user_id,
+                scan_id,
+                len(groups),
+            )
+            response = ScanCircularDependenciesResponse(
+                scan_id=scan_id,
+                circular_dependencies=[
+                    CircularDependency(
+                        group_id=group.group_id,
+                        size=group.size,
+                        members=[self._reference_schema(member) for member in group.members],
+                    )
+                    for group in groups
+                ],
+            )
+            logger.info(
+                "Built circular dependencies response user_id=%s scan_id=%s groups=%d duration_ms=%.2f",
+                user_id,
+                scan_id,
+                len(response.circular_dependencies),
+                (time.perf_counter() - started_at) * 1000,
+            )
+            return response
+        except RecordNotFoundException as exc:
+            logger.warning(
+                "Circular dependencies scan unavailable user_id=%s scan_id=%s reason=%s",
+                user_id,
+                scan_id,
+                exc,
+            )
+            raise EntityNotFoundError("successful scan", scan_id) from exc
+        except DatabaseOperationException as exc:
+            logger.error(
+                "Circular dependencies persistence operation failed user_id=%s scan_id=%s reason=%s",
+                user_id,
+                scan_id,
+                exc,
+            )
+            raise PersistenceError("Unable to load scan circular dependencies") from exc
 
     def _duplicate_matches(self, file: FileDetailRow) -> list[DuplicateMatch]:
         metadata = file.metadata.get("duplication_analysis", {})
@@ -166,11 +366,29 @@ class FileService:
         architectural = None
         errors = []
         try:
-            general = self._summary_provider.generate(GENERAL_SUMMARY_PROMPT.format(context=context))
+            general_prompt = GENERAL_SUMMARY_PROMPT.format(context=context)
+            general = (
+                self._ai_explanation_service.get_or_generate_for_file(
+                    file.id,
+                    AiExplanationType.SUMMARY,
+                    general_prompt,
+                )
+                if self._ai_explanation_service is not None
+                else self._summary_provider.generate(general_prompt)
+            )
         except ExternalDependencyError as exc:
             errors.append(str(exc))
         try:
-            architectural = self._summary_provider.generate(ARCHITECTURAL_SUMMARY_PROMPT.format(context=context))
+            architecture_prompt = ARCHITECTURAL_SUMMARY_PROMPT.format(context=context)
+            architectural = (
+                self._ai_explanation_service.get_or_generate_for_file(
+                    file.id,
+                    AiExplanationType.ARCHITECTURE_SUMMARY,
+                    architecture_prompt,
+                )
+                if self._ai_explanation_service is not None
+                else self._summary_provider.generate(architecture_prompt)
+            )
         except ExternalDependencyError as exc:
             errors.append(str(exc))
         return FileSummaries(
