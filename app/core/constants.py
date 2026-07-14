@@ -3,7 +3,7 @@
 SCAN_ID_QUERY_PARAM = "scan_id"
 PROJECT_ID_QUERY_PARAM = "project_id"
 INCLUDE_SUMMARY_QUERY_PARAM = "include_summary"
-DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 COOKIE_NAME = "access_token"
 COOKIE_MAX_AGE = 30 * 24 * 60 * 60
 FRONTEND_URL = "http://localhost:3001"

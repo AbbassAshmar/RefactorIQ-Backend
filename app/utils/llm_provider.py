@@ -6,6 +6,7 @@ from typing import Any, Protocol
 from google import genai
 from google.genai import errors as genai_errors
 
+from app.core.constants import DEFAULT_GEMINI_MODEL
 from app.core.exceptions.domain_exceptions import ExternalDependencyError
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ class GeminiLlmProvider:
         self,
         *,
         api_key: str | None,
-        model: str,
+        model: str = DEFAULT_GEMINI_MODEL,
         client: Any | None = None,
     ) -> None:
         self._api_key = api_key
