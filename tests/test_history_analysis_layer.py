@@ -40,7 +40,7 @@ def test_history_layer_counts_commits_contributors_bug_fixes_and_recent_split(tm
     assert vector.metrics["historical_update_count"] == 1
     assert vector.metrics["recent_to_lifetime_update_ratio"] == 0.5
     assert vector.metrics["bug_fix_commit_count"] == 1
-    assert vector.metrics["bug_fix_ratio"] == 0.5
+    assert vector.metrics["bug_fix_ratio"] == 1.0
     assert vector.metrics["co_change_file_count"] == 1
     assert vector.metadata["co_changed_files_sample"] == ["src/peer.py"]
 
@@ -75,6 +75,44 @@ def test_history_layer_caps_co_change_commit_scan_at_100(tmp_path: Path) -> None
     assert vector.metadata["co_change_commits_analyzed"] == 100
     assert vector.metrics["co_change_file_count"] == 100
     assert "target.py" not in vector.metadata["co_changed_files_sample"]
+
+
+def test_history_layer_excludes_creation_commit_from_bug_fix_and_cochange(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    target = repo / "target.py"
+    peer = repo / "peer.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    peer.write_text("PEER = 1\n", encoding="utf-8")
+    _commit(repo, "fix initial implementation")
+
+    vector = HistoryAnalysisLayer().run(_vector(repo, target))
+
+    assert _non_complexity_errors(vector.errors) == []
+    assert vector.metrics["bug_fix_commit_count"] == 0
+    assert vector.metrics["bug_fix_ratio"] == 0.0
+    assert vector.metrics["co_change_file_count"] == 0
+    assert vector.metadata["co_change_commits_analyzed"] == 0
+
+
+def test_history_layer_ignores_bulk_commits_for_cochange(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    target = repo / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    _commit(repo, "add target")
+
+    target.write_text("VALUE = 2\n", encoding="utf-8")
+    for index in range(HistoryAnalysisLayer.MAX_FILES_PER_CO_CHANGE_COMMIT):
+        (repo / f"peer_{index}.py").write_text(f"PEER = {index}\n", encoding="utf-8")
+    _commit(repo, "fix broad generated update")
+
+    vector = HistoryAnalysisLayer().run(_vector(repo, target))
+
+    assert _non_complexity_errors(vector.errors) == []
+    assert vector.metrics["co_change_file_count"] == 0
+    assert vector.metadata["co_change_commits_analyzed"] == 1
+    assert vector.metadata["co_change_bulk_commits_skipped"] == 1
 
 
 def test_history_layer_computes_cyclomatic_complexity_growth(tmp_path: Path) -> None:
@@ -113,17 +151,17 @@ def test_history_layer_returns_safe_defaults_for_non_git_file(tmp_path: Path) ->
 
     assert vector.has_errors()
     assert vector.metrics == {
-        "contributors_count": 0,
-        "update_count": 0,
-        "recent_update_count": 0,
-        "historical_update_count": 0,
-        "recent_to_lifetime_update_ratio": 0.0,
-        "churn_rate": 0,
-        "churn_to_size_ratio": 0.0,
-        "bug_fix_commit_count": 0,
-        "bug_fix_ratio": 0.0,
-        "cyclomatic_complexity_growth_rate": 0.0,
-        "co_change_file_count": 0,
+        "contributors_count": None,
+        "update_count": None,
+        "recent_update_count": None,
+        "historical_update_count": None,
+        "recent_to_lifetime_update_ratio": None,
+        "churn_rate": None,
+        "churn_to_size_ratio": None,
+        "bug_fix_commit_count": None,
+        "bug_fix_ratio": None,
+        "cyclomatic_complexity_growth_rate": None,
+        "co_change_file_count": None,
     }
 
 

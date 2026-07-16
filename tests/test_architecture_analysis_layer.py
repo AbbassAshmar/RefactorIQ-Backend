@@ -45,6 +45,7 @@ def test_architecture_layer_reports_scc_metadata_and_circular_dependency_size(tm
 
     for vector in vectors:
         assert vector.metrics["circular_dependency_size"] == 3
+        assert vector.metrics["runtime_circular_dependency_size"] == 3
         assert vector.metadata["sccs"] == [
             {
                 "nodes": ["src/pkg/a.py", "src/pkg/b.py", "src/pkg/c.py"],
@@ -55,6 +56,41 @@ def test_architecture_layer_reports_scc_metadata_and_circular_dependency_size(tm
                 ],
             }
         ]
+
+
+def test_architecture_layer_separates_type_only_from_runtime_cycles(
+    tmp_path: Path,
+) -> None:
+    _mark_repo_root(tmp_path)
+    a = _write(
+        tmp_path,
+        "src/pkg/a.py",
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    from pkg import b\n",
+    )
+    b = _write(
+        tmp_path,
+        "src/pkg/b.py",
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    from pkg import a\n",
+    )
+
+    result = ArchitectureAnalysisLayer().run(_vectors(tmp_path, a, b))
+
+    for vector in result:
+        assert vector.metrics["circular_dependency_size"] == 2
+        assert vector.metrics["runtime_circular_dependency_size"] == 0
+        assert vector.metrics["fan_in"] == 0
+        assert vector.metrics["fan_out"] == 0
+        assert vector.metadata["runtime_sccs"] == []
+
+    assert result.metadata["runtime_dependency_edges"] == []
+    assert result.metadata["type_only_dependency_edges"] == [
+        ["src/pkg/a.py", "src/pkg/b.py"],
+        ["src/pkg/b.py", "src/pkg/a.py"],
+    ]
 
 
 def test_architecture_layer_ignores_external_imports(tmp_path: Path) -> None:

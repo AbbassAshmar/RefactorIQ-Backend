@@ -20,3 +20,4 @@ def test_static_analysis_reads_absolute_path_and_preserves_relative_identity(tmp
 
     assert result.absolute_path == source.resolve()
     assert result.relative_path == "src/main.py"
+    assert result.metrics["source_lines_of_code"] == 2

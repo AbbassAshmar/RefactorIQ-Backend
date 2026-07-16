@@ -40,6 +40,13 @@ class NonFiniteEmbeddingService:
         return [[math.nan, 1.0] for _ in texts]
 
 
+class FailingEmbeddingService:
+    model_id = "fake-failure"
+
+    def encode(self, texts: Sequence[str]) -> list[list[float]]:
+        raise RuntimeError("embedding backend unavailable")
+
+
 def test_duplication_layer_detects_token_normalized_syntax_duplicates(tmp_path: Path) -> None:
     _mark_repo_root(tmp_path)
     left = _write(
@@ -180,6 +187,47 @@ def load_order_total(order):
     assert by_path[left].metrics["semantic_duplicate_blocks_count"] == 0
     assert by_path[left].metrics["max_similarity_score"] == 0.0
     assert by_path[left].metadata["semantic_duplicate_blocks_sample"] == []
+
+
+def test_duplication_layer_marks_semantic_metrics_unavailable_on_provider_failure(
+    tmp_path: Path,
+) -> None:
+    _mark_repo_root(tmp_path)
+    left = _write(
+        tmp_path,
+        "src/pkg/left.py",
+        """
+def normalize_names(names):
+    result = []
+    for name in names:
+        result.append(name.strip().lower())
+    return result
+""",
+    )
+    right = _write(
+        tmp_path,
+        "src/pkg/right.py",
+        """
+def clean_labels(labels):
+    output = []
+    for label in labels:
+        output.append(label.strip().lower())
+    return output
+""",
+    )
+
+    result = DuplicationAnalysisLayer(
+        embedding_service=FailingEmbeddingService(),
+    ).run(_vectors(tmp_path, left, right))
+    by_path = {vector.absolute_path: vector for vector in result}
+
+    assert by_path[left].metrics["duplicate_blocks_count"] == 1
+    assert by_path[left].metrics["semantic_duplicate_blocks_count"] is None
+    assert by_path[left].metrics["max_similarity_score"] is None
+    assert any(
+        error.startswith("semantic duplication failed:")
+        for error in by_path[left].errors
+    )
 
 
 def _mark_repo_root(path: Path) -> None:

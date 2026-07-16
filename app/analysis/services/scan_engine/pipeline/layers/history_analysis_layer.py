@@ -27,8 +27,10 @@ class HistoryAnalysisContext:
     relative_path: str
     commit_hashes: list[str] | None = None
     recent_commit_hashes: list[str] | None = None
+    commit_subjects: list[str] | None = None
     co_changed_files: set[str] = field(default_factory=set)
     co_change_commits_analyzed: int = 0
+    co_change_bulk_commits_skipped: int = 0
 
 
 MetricHandler = Callable[[HistoryAnalysisContext], int | float | str | bool | None]
@@ -40,6 +42,7 @@ class HistoryAnalysisLayer:
     LAYER_NAME = "history_analysis"
     GIT_TIMEOUT_SECONDS = 10
     MAX_COMMITS_FOR_CO_CHANGE = 100
+    MAX_FILES_PER_CO_CHANGE_COMMIT = 25
     BUG_KEYWORDS = ("fix", "bug", "issue", "patch", "hotfix", "repair", "correct", "defect")
 
     def __init__(self) -> None:
@@ -83,6 +86,7 @@ class HistoryAnalysisLayer:
         vector.metadata.update(
             {
                 "co_change_commits_analyzed": context.co_change_commits_analyzed,
+                "co_change_bulk_commits_skipped": context.co_change_bulk_commits_skipped,
                 "co_changed_files": sorted(context.co_changed_files),
                 "co_changed_files_sample": sorted(context.co_changed_files)[:10],
             }
@@ -136,15 +140,18 @@ class HistoryAnalysisLayer:
 
     def bug_fix_commit_count(self, context: HistoryAnalysisContext) -> int:
         logger.debug("[HISTORY] computing bug-fix commit count")
-        subjects = self._git_lines(context, ["log", "--follow", "--format=%s", "--", context.relative_path])
-        return sum(1 for subject in subjects if self._is_bug_fix_subject(subject))
+        return sum(
+            1
+            for subject in self._modification_commit_subjects(context)
+            if self._is_bug_fix_subject(subject)
+        )
 
     def bug_fix_ratio(self, context: HistoryAnalysisContext) -> float:
         logger.debug("[HISTORY] computing bug-fix ratio")
-        lifetime_updates = self.update_count(context)
-        if lifetime_updates == 0:
+        modification_count = max(0, self.update_count(context) - 1)
+        if modification_count == 0:
             return 0.0
-        return round(self.bug_fix_commit_count(context) / lifetime_updates, 3)
+        return round(self.bug_fix_commit_count(context) / modification_count, 3)
 
     def cyclomatic_complexity_growth_rate(self, context: HistoryAnalysisContext) -> float:
         logger.debug("[HISTORY] computing cyclomatic complexity growth rate")
@@ -193,6 +200,18 @@ class HistoryAnalysisLayer:
             )
         return context.recent_commit_hashes
 
+    def _commit_subjects(self, context: HistoryAnalysisContext) -> list[str]:
+        if context.commit_subjects is None:
+            context.commit_subjects = self._git_lines(
+                context,
+                ["log", "--follow", "--format=%s", "--", context.relative_path],
+            )
+        return context.commit_subjects
+
+    def _modification_commit_subjects(self, context: HistoryAnalysisContext) -> list[str]:
+        subjects = self._commit_subjects(context)
+        return subjects[:-1] if subjects else []
+
     def _oldest_file_source(self, context: HistoryAnalysisContext) -> str:
         commits = self._git_lines(
             context,
@@ -204,7 +223,9 @@ class HistoryAnalysisLayer:
         return self._git_output(context, ["show", f"{commits[0]}:{context.relative_path}"])
 
     def _compute_co_changed_files(self, context: HistoryAnalysisContext) -> None:
-        commits = self._commit_hashes(context)[: self.MAX_COMMITS_FOR_CO_CHANGE]
+        commit_hashes = self._commit_hashes(context)
+        modification_commits = commit_hashes[:-1] if commit_hashes else []
+        commits = modification_commits[: self.MAX_COMMITS_FOR_CO_CHANGE]
         context.co_change_commits_analyzed = len(commits)
 
         for commit_hash in commits:
@@ -212,6 +233,10 @@ class HistoryAnalysisLayer:
                 context,
                 ["diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash],
             )
+            if len(changed_files) > self.MAX_FILES_PER_CO_CHANGE_COMMIT:
+                context.co_change_bulk_commits_skipped += 1
+                continue
+
             for changed_file in changed_files:
                 normalized = changed_file.strip()
                 if not normalized or normalized == context.relative_path:
@@ -278,17 +303,17 @@ class HistoryAnalysisLayer:
         normalized = subject.lower()
         return any(keyword in normalized for keyword in self.BUG_KEYWORDS)
 
-    def _safe_default_metrics(self) -> dict[str, int | float]:
+    def _safe_default_metrics(self) -> dict[str, int | float | None]:
         return {
-            "contributors_count": 0,
-            "update_count": 0,
-            "recent_update_count": 0,
-            "historical_update_count": 0,
-            "recent_to_lifetime_update_ratio": 0.0,
-            "churn_rate": 0,
-            "churn_to_size_ratio": 0.0,
-            "bug_fix_commit_count": 0,
-            "bug_fix_ratio": 0.0,
-            "cyclomatic_complexity_growth_rate": 0.0,
-            "co_change_file_count": 0,
+            "contributors_count": None,
+            "update_count": None,
+            "recent_update_count": None,
+            "historical_update_count": None,
+            "recent_to_lifetime_update_ratio": None,
+            "churn_rate": None,
+            "churn_to_size_ratio": None,
+            "bug_fix_commit_count": None,
+            "bug_fix_ratio": None,
+            "cyclomatic_complexity_growth_rate": None,
+            "co_change_file_count": None,
         }

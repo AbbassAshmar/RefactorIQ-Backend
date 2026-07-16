@@ -20,9 +20,12 @@ class ArchitectureGraphContext:
     vectors: list[MetricsVector]
     module_to_relative_path: dict[str, str]
     graph: Any
+    runtime_graph: Any
     betweenness: dict[str, float]
     sccs: list[dict[str, list[str] | list[list[str]]]]
     scc_size_by_path: dict[str, int]
+    runtime_sccs: list[dict[str, list[str] | list[list[str]]]]
+    runtime_scc_size_by_path: dict[str, int]
 
 
 MetricHandler = Callable[[ArchitectureGraphContext, str], int | float | None]
@@ -40,6 +43,7 @@ class ArchitectureAnalysisLayer:
             "transitive_dependents_count": self.transitive_dependents_count,
             "betweenness_centrality": self.betweenness_centrality,
             "circular_dependency_size": self.circular_dependency_size,
+            "runtime_circular_dependency_size": self.runtime_circular_dependency_size,
             "instability_index": self.instability_index,
         }
 
@@ -73,6 +77,7 @@ class ArchitectureAnalysisLayer:
 
                 vector.metadata = {
                     "sccs": context.sccs,
+                    "runtime_sccs": context.runtime_sccs,
                 }
             except Exception as exc:
                 logger.warning("[ARCHITECTURE] failed for %s: %s", vector.relative_path, exc)
@@ -97,13 +102,17 @@ class ArchitectureAnalysisLayer:
 
         module_to_relative_path = self._module_to_relative_path(vectors)
         graph = nx.DiGraph()
+        runtime_graph = nx.DiGraph()
         graph.add_nodes_from(
+            vector.relative_path for vector in vectors if vector.relative_path is not None
+        )
+        runtime_graph.add_nodes_from(
             vector.relative_path for vector in vectors if vector.relative_path is not None
         )
 
         for vector in vectors:
             assert vector.absolute_path is not None and vector.relative_path is not None
-            dependencies = self._dependencies_for_file(
+            dependencies, runtime_dependencies = self._dependencies_for_file(
                 vector.absolute_path,
                 vector.relative_path,
                 module_to_relative_path,
@@ -111,16 +120,23 @@ class ArchitectureAnalysisLayer:
             for dependency in dependencies:
                 if dependency != vector.relative_path:
                     graph.add_edge(vector.relative_path, dependency)
+            for dependency in runtime_dependencies:
+                if dependency != vector.relative_path:
+                    runtime_graph.add_edge(vector.relative_path, dependency)
 
-        betweenness = nx.betweenness_centrality(graph, normalized=True)
+        betweenness = nx.betweenness_centrality(runtime_graph, normalized=True)
         sccs, scc_size_by_path = self._scc_metadata(graph)
+        runtime_sccs, runtime_scc_size_by_path = self._scc_metadata(runtime_graph)
         return ArchitectureGraphContext(
             vectors=vectors,
             module_to_relative_path=module_to_relative_path,
             graph=graph,
+            runtime_graph=runtime_graph,
             betweenness=betweenness,
             sccs=sccs,
             scc_size_by_path=scc_size_by_path,
+            runtime_sccs=runtime_sccs,
+            runtime_scc_size_by_path=runtime_scc_size_by_path,
         )
 
     def _dependencies_for_file(
@@ -128,29 +144,64 @@ class ArchitectureAnalysisLayer:
         absolute_path: Path,
         current_relative_path: str,
         module_to_relative_path: dict[str, str],
-    ) -> set[str]:
+    ) -> tuple[set[str], set[str]]:
         try:
             tree = ast.parse(absolute_path.read_text(encoding="utf-8"))
         except Exception as exc:
             logger.warning("[ARCHITECTURE] failed to parse %s: %s", absolute_path, exc)
-            return set()
+            return set(), set()
 
         current_module = self._module_for_relative_path(current_relative_path)
         dependencies: set[str] = set()
+        runtime_dependencies: set[str] = set()
+        type_only_import_ids = self._type_checking_import_ids(tree)
         for statement in ast.walk(tree):
+            statement_dependencies: set[str] = set()
             if isinstance(statement, ast.Import):
                 for alias in statement.names:
                     dependency = self._resolve_absolute_import(alias.name, module_to_relative_path)
                     if dependency is not None:
-                        dependencies.add(dependency)
+                        statement_dependencies.add(dependency)
             elif isinstance(statement, ast.ImportFrom):
                 for module_name in self._candidate_import_from_modules(statement, current_module):
                     dependency = self._resolve_absolute_import(module_name, module_to_relative_path)
                     if dependency is not None:
-                        dependencies.add(dependency)
+                        statement_dependencies.add(dependency)
                         break
 
-        return dependencies
+            dependencies.update(statement_dependencies)
+            if id(statement) not in type_only_import_ids:
+                runtime_dependencies.update(statement_dependencies)
+
+        return dependencies, runtime_dependencies
+
+    def _type_checking_import_ids(self, tree: ast.AST) -> set[int]:
+        import_ids: set[int] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.If) or not self._is_type_checking_guard(node.test):
+                continue
+            for statement in node.body:
+                import_ids.update(
+                    id(child)
+                    for child in ast.walk(statement)
+                    if isinstance(child, (ast.Import, ast.ImportFrom))
+                )
+        return import_ids
+
+    def _is_type_checking_guard(self, test: ast.AST) -> bool:
+        return any(
+            (
+                isinstance(node, ast.Name)
+                and node.id == "TYPE_CHECKING"
+            )
+            or (
+                isinstance(node, ast.Attribute)
+                and node.attr == "TYPE_CHECKING"
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "typing"
+            )
+            for node in ast.walk(test)
+        )
 
     def _candidate_import_from_modules(self, statement: ast.ImportFrom, current_module: str) -> list[str]:
         base_module = self._resolve_import_from_base(statement, current_module)
@@ -198,15 +249,15 @@ class ArchitectureAnalysisLayer:
 
     def fan_in(self, context: ArchitectureGraphContext, node: str) -> int:
         logger.debug("[ARCHITECTURE] computing fan-in")
-        return int(context.graph.in_degree(node))
+        return int(context.runtime_graph.in_degree(node))
 
     def fan_out(self, context: ArchitectureGraphContext, node: str) -> int:
         logger.debug("[ARCHITECTURE] computing fan-out")
-        return int(context.graph.out_degree(node))
+        return int(context.runtime_graph.out_degree(node))
 
     def transitive_dependents_count(self, context: ArchitectureGraphContext, node: str) -> int:
         logger.debug("[ARCHITECTURE] computing transitive dependents")
-        reverse_graph = context.graph.reverse(copy=False)
+        reverse_graph = context.runtime_graph.reverse(copy=False)
         return len(nx.descendants(reverse_graph, node))
 
     def betweenness_centrality(self, context: ArchitectureGraphContext, node: str) -> float:
@@ -217,10 +268,18 @@ class ArchitectureAnalysisLayer:
         logger.debug("[ARCHITECTURE] computing circular dependency size")
         return context.scc_size_by_path.get(node, 0)
 
+    def runtime_circular_dependency_size(
+        self,
+        context: ArchitectureGraphContext,
+        node: str,
+    ) -> int:
+        logger.debug("[ARCHITECTURE] computing runtime circular dependency size")
+        return context.runtime_scc_size_by_path.get(node, 0)
+
     def instability_index(self, context: ArchitectureGraphContext, node: str) -> float:
         logger.debug("[ARCHITECTURE] computing instability index")
-        fan_in = context.graph.in_degree(node)
-        fan_out = context.graph.out_degree(node)
+        fan_in = context.runtime_graph.in_degree(node)
+        fan_out = context.runtime_graph.out_degree(node)
         dependency_total = fan_in + fan_out
         return round(fan_out / dependency_total, 3) if dependency_total else 0.0
 
@@ -250,8 +309,23 @@ class ArchitectureAnalysisLayer:
             [source, target]
             for source, target in context.graph.edges()
         )
+        runtime_dependency_edges = sorted(
+            [source, target]
+            for source, target in context.runtime_graph.edges()
+        )
+        runtime_edge_set = {
+            (source, target)
+            for source, target in context.runtime_graph.edges()
+        }
+        type_only_dependency_edges = sorted(
+            [source, target]
+            for source, target in context.graph.edges()
+            if (source, target) not in runtime_edge_set
+        )
         return {
             "dependency_edges": dependency_edges,
+            "runtime_dependency_edges": runtime_dependency_edges,
+            "type_only_dependency_edges": type_only_dependency_edges,
             "circular_dependency_groups": [
                 {
                     "nodes": group["nodes"],
@@ -259,7 +333,15 @@ class ArchitectureAnalysisLayer:
                 }
                 for group in context.sccs
             ],
+            "runtime_circular_dependency_groups": [
+                {
+                    "nodes": group["nodes"],
+                    "size": len(group["nodes"]),
+                }
+                for group in context.runtime_sccs
+            ],
             "sccs": context.sccs,
+            "runtime_sccs": context.runtime_sccs,
         }
 
     # -- Path and module helpers ------------------------------------------
@@ -294,12 +376,13 @@ class ArchitectureAnalysisLayer:
             parts = parts[:-1]
         return ".".join(parts)
 
-    def _safe_default_metrics(self) -> dict[str, int | float]:
+    def _safe_default_metrics(self) -> dict[str, int | float | None]:
         return {
-            "fan_in": 0,
-            "fan_out": 0,
-            "transitive_dependents_count": 0,
-            "betweenness_centrality": 0.0,
-            "circular_dependency_size": 0,
-            "instability_index": 0.0,
+            "fan_in": None,
+            "fan_out": None,
+            "transitive_dependents_count": None,
+            "betweenness_centrality": None,
+            "circular_dependency_size": None,
+            "runtime_circular_dependency_size": None,
+            "instability_index": None,
         }

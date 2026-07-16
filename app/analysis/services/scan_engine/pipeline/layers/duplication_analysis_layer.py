@@ -89,7 +89,6 @@ class DuplicationAnalysisLayer:
             "duplicate_loc_count": self.duplicate_loc_count,
             "duplication_group_size": self.duplication_group_size,
             "semantic_duplicate_blocks_count": self.semantic_duplicate_blocks_count,
-            "ast_duplicate_blocks_count": self.ast_duplicate_blocks_count,
             "max_similarity_score": self.max_similarity_score,
             "duplicate_file_candidates_count": self.duplicate_file_candidates_count,
         }
@@ -349,16 +348,24 @@ class DuplicationAnalysisLayer:
             context.syntax_matches_by_block,
         )
 
-    def semantic_duplicate_blocks_count(self, context: DuplicationAnalysisContext, path: Path) -> int:
+    def semantic_duplicate_blocks_count(
+        self,
+        context: DuplicationAnalysisContext,
+        path: Path,
+    ) -> int | None:
         logger.debug("[DUPLICATION] computing semantic duplicate block count")
+        if context.semantic_error is not None:
+            return None
         return len(self._semantic_duplicate_blocks(context, path))
 
-    def ast_duplicate_blocks_count(self, context: DuplicationAnalysisContext, path: Path) -> int:
-        logger.debug("[DUPLICATION] computing AST duplicate block count")
-        return 0
-
-    def max_similarity_score(self, context: DuplicationAnalysisContext, path: Path) -> float:
+    def max_similarity_score(
+        self,
+        context: DuplicationAnalysisContext,
+        path: Path,
+    ) -> float | None:
         logger.debug("[DUPLICATION] computing max semantic similarity score")
+        if context.semantic_error is not None:
+            return None
         return self._max_similarity(
             self._semantic_duplicate_blocks(context, path),
             context.semantic_matches_by_block,
@@ -572,13 +579,12 @@ class DuplicationAnalysisLayer:
         if any(vector.absolute_path is None or vector.relative_path is None for vector in vectors):
             raise ValueError("Duplication analysis requires both absolute_path and relative_path")
 
-    def _safe_default_metrics(self) -> dict[str, int | float]:
+    def _safe_default_metrics(self) -> dict[str, int | float | None]:
         return {
-            "duplicate_blocks_count": 0,
-            "duplicate_loc_count": 0,
-            "duplication_group_size": 0,
-            "semantic_duplicate_blocks_count": 0,
-            "ast_duplicate_blocks_count": 0,
-            "max_similarity_score": 0.0,
-            "duplicate_file_candidates_count": 0,
+            "duplicate_blocks_count": None,
+            "duplicate_loc_count": None,
+            "duplication_group_size": None,
+            "semantic_duplicate_blocks_count": None,
+            "max_similarity_score": None,
+            "duplicate_file_candidates_count": None,
         }

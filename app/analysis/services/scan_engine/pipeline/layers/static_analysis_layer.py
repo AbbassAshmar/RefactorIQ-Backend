@@ -59,6 +59,7 @@ class StaticAnalysisLayer:
             "max_cognitive_complexity": self.max_cognitive_complexity,
             "testing_coverage": self.testing_coverage,
             "lines_of_code": self.lines_of_code,
+            "source_lines_of_code": self.source_lines_of_code,
             "logical_lines_of_code": self.logical_lines_of_code,
             "count_of_comments": self.count_of_comments,
             "long_conditions_count": self.long_conditions_count,
@@ -105,6 +106,10 @@ class StaticAnalysisLayer:
     def lines_of_code(self, context: StaticAnalysisContext) -> int:
         logger.debug("[STATIC] computing LOC")
         return int(self._raw_metrics(context).loc)
+
+    def source_lines_of_code(self, context: StaticAnalysisContext) -> int:
+        logger.debug("[STATIC] computing source LOC")
+        return int(self._raw_metrics(context).sloc)
 
     def logical_lines_of_code(self, context: StaticAnalysisContext) -> int:
         logger.debug("[STATIC] computing LLOC")

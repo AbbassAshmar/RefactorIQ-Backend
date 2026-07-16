@@ -13,7 +13,7 @@ from app.analysis.services.scan_engine.pipeline.metrics_vector import LayerResul
 def _run_decision_file(
     layer: DecisionAnalysisLayer,
     relative_path: str,
-    metrics_by_layer: dict[str, dict[str, int | float]],
+    metrics_by_layer: dict[str, dict[str, int | float | None]],
 ) -> MetricsVector:
     absolute_path = Path("/workspace") / relative_path
     result = LayerResult(
@@ -89,6 +89,7 @@ def test_decision_layer_scores_files_between_zero_and_one_and_ranks_pressure() -
                 "transitive_dependents_count": 25,
                 "betweenness_centrality": 0.7,
                 "circular_dependency_size": 4,
+                "runtime_circular_dependency_size": 4,
                 "instability_index": 0.8,
             },
         ),
@@ -149,6 +150,7 @@ def test_decision_layer_scores_files_between_zero_and_one_and_ranks_pressure() -
                 "transitive_dependents_count": 0,
                 "betweenness_centrality": 0.0,
                 "circular_dependency_size": 0,
+                "runtime_circular_dependency_size": 0,
                 "instability_index": 0.5,
             },
         ),
@@ -173,7 +175,7 @@ def test_decision_layer_scores_files_between_zero_and_one_and_ranks_pressure() -
     assert 0.0 <= calm_score <= 1.0
     assert 0.0 <= hot_score <= 1.0
     assert hot_score > calm_score
-    assert by_file["src/hot.py"].metadata["priority_band"] in {"medium", "high"}
+    assert by_file["src/hot.py"].metadata["priority_band"] == "high"
 
     assert summary.metrics["files_scored_count"] == 2
     assert summary.metrics["max_refactor_score"] == hot_score
@@ -208,7 +210,50 @@ def test_decision_layer_computes_each_component_once_per_file(monkeypatch: pytes
     _run_decision_file(
         layer,
         "src/cached.py",
-        {"static_analysis": {"logical_lines_of_code": 500}},
+        {
+            "static_analysis": {
+                "max_cyclomatic_complexity": 8,
+                "max_cognitive_complexity": 12,
+                "average_cyclomatic_complexity": 3,
+                "average_cognitive_complexity": 4,
+                "lines_of_code": 200,
+                "source_lines_of_code": 160,
+                "logical_lines_of_code": 120,
+                "long_conditions_count": 1,
+                "max_if_else_chain_length": 2,
+                "average_parameters_count": 3,
+                "count_of_fixme_comments": 0,
+                "count_of_empty_except_blocks": 0,
+                "testing_coverage": 70,
+            },
+            "history_analysis": {
+                "update_count": 5,
+                "recent_update_count": 2,
+                "churn_to_size_ratio": 1.5,
+                "bug_fix_ratio": 0.25,
+                "bug_fix_commit_count": 1,
+                "cyclomatic_complexity_growth_rate": 1,
+                "co_change_file_count": 3,
+                "contributors_count": 2,
+            },
+            "duplication_analysis": {
+                "duplicate_loc_count": 20,
+                "duplicate_blocks_count": 2,
+                "semantic_duplicate_blocks_count": 1,
+                "duplication_group_size": 2,
+                "duplicate_file_candidates_count": 2,
+                "max_similarity_score": 0.9,
+            },
+            "architecture_analysis": {
+                "fan_in": 3,
+                "fan_out": 4,
+                "transitive_dependents_count": 8,
+                    "betweenness_centrality": 0.01,
+                    "circular_dependency_size": 0,
+                    "runtime_circular_dependency_size": 0,
+                    "instability_index": 0.57,
+            },
+        },
     )
 
     assert weighted_score_calls == {
@@ -220,7 +265,7 @@ def test_decision_layer_computes_each_component_once_per_file(monkeypatch: pytes
     }
 
 
-def test_count_densities_are_size_independent_except_for_explicit_size_metric() -> None:
+def test_duplication_materiality_prevents_tiny_clone_counts_from_dominating() -> None:
     layer = DecisionAnalysisLayer()
 
     def score_file(relative_path: str, loc: int, scale: int) -> MetricsVector:
@@ -229,11 +274,19 @@ def test_count_densities_are_size_independent_except_for_explicit_size_metric() 
             relative_path,
             {
                 "static_analysis": {
+                    "max_cyclomatic_complexity": 0,
+                    "max_cognitive_complexity": 0,
+                    "average_cyclomatic_complexity": 0,
+                    "average_cognitive_complexity": 0,
                     "logical_lines_of_code": loc,
                     "lines_of_code": loc,
+                    "source_lines_of_code": loc,
                     "long_conditions_count": scale,
+                    "max_if_else_chain_length": 0,
+                    "average_parameters_count": 0,
                     "count_of_fixme_comments": scale,
                     "count_of_empty_except_blocks": scale,
+                    "testing_coverage": 100,
                 },
                 "duplication_analysis": {
                     "duplicate_loc_count": 20 * scale,
@@ -249,12 +302,13 @@ def test_count_densities_are_size_independent_except_for_explicit_size_metric() 
     small_file = score_file("src/small.py", loc=100, scale=1)
     large_file = score_file("src/large.py", loc=1_000, scale=10)
 
-    assert large_file.metrics["duplication_score"] == small_file.metrics["duplication_score"]
+    assert large_file.metrics["duplication_score"] > small_file.metrics["duplication_score"]
+    assert small_file.metrics["duplication_score"] < 0.4
     assert (
         large_file.metrics["complexity_score"] - small_file.metrics["complexity_score"]
-    ) == pytest.approx(0.096)
+    ) == pytest.approx(0.12)
     assert small_file.metadata["count_density_reference_loc"] == 500.0
-    assert small_file.metadata["scoring_model_version"] == 2
+    assert small_file.metadata["scoring_model_version"] == 3
 
 
 def test_architecture_score_omits_deterministic_dependency_total() -> None:
@@ -291,6 +345,177 @@ def test_component_failure_is_not_recomputed_through_refactor_score() -> None:
     assert vector.metrics["refactor_score"] is None
     assert len(vector.errors) == 1
     assert vector.errors[0].startswith("complexity_score failed:")
+
+
+def test_known_fixture_hotspots_cross_calibrated_priority_bands() -> None:
+    layer = DecisionAnalysisLayer()
+    tower = _run_decision_file(
+        layer,
+        "src/nimbus_ops/application/services/operational_control_tower.py",
+        {
+            "static_analysis": {
+                "lines_of_code": 323,
+                "source_lines_of_code": 257,
+                "logical_lines_of_code": 208,
+                "max_cyclomatic_complexity": 29,
+                "max_cognitive_complexity": 64,
+                "average_cyclomatic_complexity": 5.846,
+                "average_cognitive_complexity": 8.643,
+                "long_conditions_count": 1,
+                "max_if_else_chain_length": 4,
+                "average_parameters_count": 3,
+                "count_of_fixme_comments": 0,
+                "count_of_empty_except_blocks": 0,
+                "testing_coverage": 0,
+            },
+            "history_analysis": {
+                "update_count": 1,
+                "recent_update_count": 1,
+                "churn_to_size_ratio": 1.0,
+                "bug_fix_ratio": 0.0,
+                "bug_fix_commit_count": 0,
+                "cyclomatic_complexity_growth_rate": 0,
+                "co_change_file_count": 0,
+                "contributors_count": 1,
+            },
+            "duplication_analysis": {
+                "duplicate_loc_count": 3,
+                "duplicate_blocks_count": 1,
+                "semantic_duplicate_blocks_count": 0,
+                "duplication_group_size": 2,
+                "duplicate_file_candidates_count": 1,
+                "max_similarity_score": 0.0,
+            },
+            "architecture_analysis": {
+                "fan_in": 10,
+                "fan_out": 5,
+                "transitive_dependents_count": 36,
+                "betweenness_centrality": 0.024692,
+                "circular_dependency_size": 11,
+                "runtime_circular_dependency_size": 0,
+                "instability_index": 0.333,
+            },
+        },
+    )
+    exporter = _run_decision_file(
+        layer,
+        "src/nimbus_ops/infrastructure/legacy_operations_exporter.py",
+        {
+            "static_analysis": {
+                "lines_of_code": 125,
+                "source_lines_of_code": 103,
+                "logical_lines_of_code": 49,
+                "max_cyclomatic_complexity": 19,
+                "max_cognitive_complexity": 15,
+                "average_cyclomatic_complexity": 7,
+                "average_cognitive_complexity": 4.167,
+                "long_conditions_count": 0,
+                "max_if_else_chain_length": 1,
+                "average_parameters_count": 3,
+                "count_of_fixme_comments": 0,
+                "count_of_empty_except_blocks": 0,
+                "testing_coverage": 0,
+            },
+            "history_analysis": {
+                "update_count": 1,
+                "recent_update_count": 1,
+                "churn_to_size_ratio": 1.0,
+                "bug_fix_ratio": 0.0,
+                "bug_fix_commit_count": 0,
+                "cyclomatic_complexity_growth_rate": 0,
+                "co_change_file_count": 0,
+                "contributors_count": 1,
+            },
+            "duplication_analysis": {
+                "duplicate_loc_count": 3,
+                "duplicate_blocks_count": 1,
+                "semantic_duplicate_blocks_count": 0,
+                "duplication_group_size": 2,
+                "duplicate_file_candidates_count": 1,
+                "max_similarity_score": 0.0,
+            },
+            "architecture_analysis": {
+                "fan_in": 1,
+                "fan_out": 2,
+                "transitive_dependents_count": 15,
+                "betweenness_centrality": 0.000026,
+                "circular_dependency_size": 0,
+                "runtime_circular_dependency_size": 0,
+                "instability_index": 0.667,
+            },
+        },
+    )
+
+    assert tower.metadata["priority_band"] == "high"
+    assert exporter.metadata["priority_band"] == "medium"
+    assert tower.metrics["refactor_score"] > exporter.metrics["refactor_score"]
+
+
+def test_unavailable_inputs_are_unscored_instead_of_low_risk() -> None:
+    layer = DecisionAnalysisLayer()
+    unavailable = _run_decision_file(
+        layer,
+        "src/unavailable.py",
+        {
+            "history_analysis": {
+                metric_name: None
+                for metric_name in (
+                    "contributors_count",
+                    "update_count",
+                    "recent_update_count",
+                    "churn_to_size_ratio",
+                    "bug_fix_commit_count",
+                    "bug_fix_ratio",
+                    "cyclomatic_complexity_growth_rate",
+                    "co_change_file_count",
+                )
+            }
+        },
+    )
+    scored = MetricsVector(
+        layer=layer.LAYER_NAME,
+        absolute_path=Path("/workspace/src/scored.py"),
+        relative_path="src/scored.py",
+        metrics={"refactor_score": 0.5},
+    )
+    summary = layer.summarize(
+        LayerResult(vectors=[unavailable, scored])
+    )[0]
+
+    assert unavailable.metrics["refactor_score"] is None
+    assert unavailable.metadata["priority_band"] is None
+    assert unavailable.metrics["score_confidence"] == 0.0
+    assert summary.metrics["files_evaluated_count"] == 2
+    assert summary.metrics["files_scored_count"] == 1
+    assert summary.metrics["unscored_files_count"] == 1
+    assert summary.metrics["average_refactor_score"] == 0.5
+
+
+def test_semantic_metric_failure_renormalizes_duplication_with_lower_confidence() -> None:
+    layer = DecisionAnalysisLayer()
+    vector = _run_decision_file(
+        layer,
+        "src/partial-duplication.py",
+        {
+            "static_analysis": {
+                "lines_of_code": 100,
+                "source_lines_of_code": 80,
+                "logical_lines_of_code": 50,
+            },
+            "duplication_analysis": {
+                "duplicate_loc_count": 30,
+                "duplicate_blocks_count": 3,
+                "semantic_duplicate_blocks_count": None,
+                "duplication_group_size": 3,
+                "duplicate_file_candidates_count": 2,
+                "max_similarity_score": None,
+            },
+        },
+    )
+
+    assert vector.metrics["duplication_score"] is not None
+    assert vector.metadata["component_metric_coverage"]["duplication_score"] == pytest.approx(0.68)
+    assert 0.0 < vector.metrics["score_confidence"] < 1.0
 
 
 def test_priority_threshold_constants_drive_bands_and_summary(
