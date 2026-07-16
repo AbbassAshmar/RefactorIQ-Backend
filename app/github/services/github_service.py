@@ -11,6 +11,11 @@ from app.users.users_service import UserService
 
 import subprocess
 from pathlib import Path
+import logging
+from time import perf_counter
+
+
+logger = logging.getLogger(__name__)
 
 
 class GithubService:
@@ -111,6 +116,14 @@ class GithubService:
         destination: Path,
     ) -> None:
         url = f"https://{access_token}@github.com/{repo_owner}/{repo_name}.git"
+        started = perf_counter()
+        logger.info(
+            "[GITHUB CLONE STARTED] repo=%s/%s branch=%s destination=%s",
+            repo_owner,
+            repo_name,
+            branch,
+            destination,
+        )
         try:
             subprocess.run(
                 [
@@ -124,13 +137,37 @@ class GithubService:
                 capture_output=True,
                 timeout=120,
             )
+            logger.info(
+                "[GITHUB CLONE COMPLETED] repo=%s/%s branch=%s elapsed_seconds=%.3f",
+                repo_owner,
+                repo_name,
+                branch,
+                perf_counter() - started,
+            )
         except subprocess.CalledProcessError as exc:
+            # Do not log ``exc`` or its traceback: CalledProcessError includes
+            # the full git command, which contains the access-token URL.
+            logger.error(
+                "[GITHUB CLONE FAILED] repo=%s/%s branch=%s reason=nonzero_exit",
+                repo_owner,
+                repo_name,
+                branch,
+            )
             raise ExternalDependencyError(
                 f"Failed to clone {repo_owner}/{repo_name}@{branch}"
             ) from exc
         except FileNotFoundError as exc:
+            logger.error("[GITHUB CLONE FAILED] repo=%s/%s reason=git_missing", repo_owner, repo_name)
             raise ExternalDependencyError(
                 "Git executable is not available in the runtime environment"
             ) from exc
         except subprocess.TimeoutExpired as exc:
+            # TimeoutExpired also retains the command, so avoid logging its
+            # representation for the same token-leakage reason.
+            logger.error(
+                "[GITHUB CLONE FAILED] repo=%s/%s branch=%s reason=timeout",
+                repo_owner,
+                repo_name,
+                branch,
+            )
             raise ExternalDependencyError("Clone timed out") from exc

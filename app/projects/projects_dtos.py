@@ -1,4 +1,4 @@
-"""Project request and response DTOs."""
+"""Project request, response, and internal deletion DTOs."""
 
 import uuid
 from dataclasses import dataclass
@@ -34,6 +34,14 @@ class ProjectListResponse(ProjectResponse):
     """Project response with status derived from the project's scans."""
 
     status: ScanStatus | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectDeletionContext:
+    project_id: uuid.UUID
+    project_name: str
+    scan_ids: tuple[uuid.UUID, ...]
+    active_scan_ids: tuple[uuid.UUID, ...]
 
 
 ProjectSortBy = Literal[

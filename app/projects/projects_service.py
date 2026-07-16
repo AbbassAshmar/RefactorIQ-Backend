@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, time, timezone
+import logging
 
+from app.core.enums import ScanStatus
 from app.core.exceptions.domain_exceptions import (
     ConflictError,
     EntityNotFoundError,
+    InfrastructureError,
     PersistenceError,
 )
 from app.core.exceptions.repository_exceptions import (
@@ -14,6 +17,8 @@ from app.core.exceptions.repository_exceptions import (
     RecordNotFoundException,
 )
 from app.projects.projects_repository import ProjectRepository
+from app.scans.scans_service import ScanService
+from app.analysis.services.scan_engine.pipeline.scan_workspace import ScanWorkspaceService
 from app.projects.projects_dtos import (
     AdminProjectListFilters,
     AdminProjectListResult,
@@ -27,9 +32,19 @@ from app.projects.projects_dtos import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 class ProjectService:
-    def __init__(self, repository: ProjectRepository) -> None:
+    def __init__(
+        self,
+        repository: ProjectRepository,
+        scan_service: ScanService,
+        workspace_service: ScanWorkspaceService,
+    ) -> None:
         self._repo = repository
+        self._scan_service = scan_service
+        self._workspace_service = workspace_service
 
     def create_project(self, user_id: uuid.UUID, repo_data: ProjectCreate) -> ProjectResponse:
         try:
@@ -57,10 +72,82 @@ class ProjectService:
         try:
             return self._repo.get_by_id_and_user_id(project_id, user_id)
         except RecordNotFoundException as exc:
-            print("Project not found or access denied")
+            logger.warning("Project not found or access denied project_id=%s user_id=%s", project_id, user_id)
             raise EntityNotFoundError("project", project_id) from exc
         except DatabaseOperationException as exc:
             raise PersistenceError("Unable to retrieve project") from exc
+
+    def delete_project(self, project_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        started = datetime.now(timezone.utc)
+        logger.info("[PROJECT DELETE STARTED] project_id=%s user_id=%s", project_id, user_id)
+        try:
+            context = self._repo.prepare_owned_deletion(project_id, user_id)
+        except RecordNotFoundException as exc:
+            raise EntityNotFoundError("project", project_id) from exc
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to prepare project deletion") from exc
+        cancellation_outcomes: dict[uuid.UUID, bool] = {}
+        try:
+            cancellation_outcomes = self._scan_service.request_scan_cancellations(
+                list(context.active_scan_ids)
+            )
+            self._scan_service.forget_scan_results(list(context.scan_ids))
+            for scan_id in context.scan_ids:
+                logger.info("[PROJECT DELETE WORKSPACE] project_id=%s scan_id=%s", project_id, scan_id)
+                try:
+                    self._workspace_service.delete_by_scan_id(scan_id)
+                except FileNotFoundError:
+                    logger.debug("[PROJECT DELETE WORKSPACE ABSENT] project_id=%s scan_id=%s", project_id, scan_id)
+                except OSError as exc:
+                    logger.exception(
+                        "[PROJECT DELETE WORKSPACE FAILED] project_id=%s scan_id=%s",
+                        project_id,
+                        scan_id,
+                    )
+                    raise InfrastructureError(
+                        "Unable to clean project scan workspace",
+                        details={"project_id": str(project_id), "scan_id": str(scan_id)},
+                    ) from exc
+
+            self._repo.delete_prepared_project(context, user_id)
+        except RecordNotFoundException as exc:
+            self._abort_project_deletion(context)
+            raise EntityNotFoundError("project", project_id) from exc
+        except DatabaseOperationException as exc:
+            self._abort_project_deletion(context)
+            raise PersistenceError("Unable to delete project") from exc
+        except Exception:
+            self._abort_project_deletion(context)
+            raise
+
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        logger.info(
+            "[PROJECT DELETE COMPLETED] project_id=%s project_name=%s user_id=%s scan_count=%d active_scan_count=%d revoke_failures=%d elapsed_seconds=%.3f",
+            project_id,
+            context.project_name,
+            user_id,
+            len(context.scan_ids),
+            len(context.active_scan_ids),
+            sum(not outcome for outcome in cancellation_outcomes.values()),
+            elapsed,
+        )
+
+    def _abort_project_deletion(self, context) -> None:
+        self._repo.abort_prepared_deletion()
+        if not context.active_scan_ids:
+            return
+        try:
+            for scan_id in context.active_scan_ids:
+                self._scan_service.transition_scan_status(
+                    scan_id,
+                    ScanStatus.CANCELLED,
+                    expected_statuses={ScanStatus.PENDING, ScanStatus.RUNNING},
+                )
+        except Exception:
+            logger.exception(
+                "[PROJECT DELETE COMPENSATION FAILED] project_id=%s",
+                context.project_id,
+            )
 
     def list_admin_projects(
         self,

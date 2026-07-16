@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from app.projects.projects_dtos import (
     ProjectCreate,
     ProjectListResponse,
     ProjectResponse,
+    ProjectDeletionContext,
 )
 
 import logging
@@ -133,6 +134,97 @@ class ProjectRepository:
                 "Failed to load project",
                 details={"project_id": str(project_id), "user_id": str(user_id)},
             ) from exc
+
+    def prepare_owned_deletion(
+        self,
+        project_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> ProjectDeletionContext:
+        """Lock a project and its scans until deletion or rollback completes."""
+        try:
+            logger.info(
+                "Preparing project deletion project_id=%s user_id=%s",
+                project_id,
+                user_id,
+            )
+            project = self._db.execute(
+                select(Project)
+                .where(Project.id == project_id, Project.user_id == user_id)
+                .with_for_update()
+            ).scalar_one_or_none()
+            if project is None:
+                raise RecordNotFoundException(
+                    "Project not found",
+                    details={"project_id": str(project_id), "user_id": str(user_id)},
+                )
+
+            scan_rows = self._db.execute(
+                select(Scan.id, Scan.status)
+                .where(Scan.project_id == project_id)
+                .with_for_update()
+            ).all()
+            scan_ids = tuple(row[0] for row in scan_rows)
+            active_scan_ids = tuple(
+                row[0]
+                for row in scan_rows
+                if (row[1] if isinstance(row[1], ScanStatus) else ScanStatus(row[1]))
+                in {ScanStatus.PENDING, ScanStatus.RUNNING}
+            )
+            logger.info(
+                "Prepared project deletion project_id=%s scan_count=%d active_scan_count=%d",
+                project_id,
+                len(scan_ids),
+                len(active_scan_ids),
+            )
+            return ProjectDeletionContext(
+                project_id=project_id,
+                project_name=project.name,
+                scan_ids=scan_ids,
+                active_scan_ids=active_scan_ids,
+            )
+        except RecordNotFoundException:
+            raise
+        except (SQLAlchemyError, ValueError) as exc:
+            self._db.rollback()
+            logger.exception("Failed to prepare project deletion project_id=%s", project_id)
+            raise DatabaseOperationException(
+                "Failed to prepare project deletion",
+                details={"project_id": str(project_id)},
+            ) from exc
+
+    def delete_prepared_project(self, context: ProjectDeletionContext, user_id: uuid.UUID) -> None:
+        try:
+            result = self._db.execute(
+                delete(Project).where(
+                    Project.id == context.project_id,
+                    Project.user_id == user_id,
+                )
+            )
+            if result.rowcount != 1:
+                raise RecordNotFoundException(
+                    "Project not found",
+                    details={"project_id": str(context.project_id), "user_id": str(user_id)},
+                )
+            self._db.commit()
+            logger.info(
+                "Deleted project row project_id=%s cascaded_scan_count=%d",
+                context.project_id,
+                len(context.scan_ids),
+            )
+        except RecordNotFoundException:
+            self._db.rollback()
+            raise
+        except SQLAlchemyError as exc:
+            self._db.rollback()
+            logger.exception("Failed to delete project project_id=%s", context.project_id)
+            raise DatabaseOperationException(
+                "Failed to delete project",
+                details={"project_id": str(context.project_id)},
+            ) from exc
+
+    def abort_prepared_deletion(self) -> None:
+        logger.info("Rolling back prepared project deletion")
+        self._db.rollback()
 
     def count_projects(
         self,

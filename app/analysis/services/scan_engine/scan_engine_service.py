@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from uuid import UUID
 from datetime import datetime
+from time import perf_counter
 
 from app.core.enums import ScanStatus
 from app.scans.scans_service import ScanService
@@ -30,16 +31,26 @@ class ScanEngineService:
         self._scan_pipeline = scan_pipeline
 
     def execute_scan(self, scan_id: UUID) -> None:
+        started = perf_counter()
+        logger.info("[SCAN ENGINE STARTED] scan_id=%s", scan_id)
         scan = self._scan_service.get_scan_by_id_include_project_user(scan_id)
         project = scan.project
         user = project.user
         access_token = GithubService._get_decrypted_access_token(user.github_access_token)
 
-        # Retries reuse the same scan_id, so clear any stale workspace first.
+        # A worker termination or cancellation can leave a stale workspace;
+        # clear it before creating the workspace for this execution.
         self._workspace_service.delete_by_scan_id(scan_id)
         workspace = self._workspace_service.create(scan_id)
         try:
-            logger.info(f"[SCAN] Cloning repository for scan {scan_id}")
+            logger.info(
+                "[SCAN CLONE STARTED] scan_id=%s project_id=%s repo=%s/%s branch=%s",
+                scan_id,
+                project.id,
+                project.repo_owner,
+                project.repo_name,
+                project.branch,
+            )
             self._github_service.clone_repository(
                 repo_owner=project.repo_owner,
                 repo_name=project.repo_name,
@@ -47,28 +58,33 @@ class ScanEngineService:
                 access_token=access_token,
                 destination=workspace.root_path,
             )
+            logger.info("[SCAN CLONE COMPLETED] scan_id=%s", scan_id)
 
             self._run_tests_with_coverage(workspace.root_path)
 
-            # log file paths found
             file_paths = workspace.python_files()
-            logger.info(f"[SCAN] Found {len(file_paths)} Python files for scan {scan_id}")
-            logger.info(f"[SCAN] Found {len(file_paths)} Python files for scan {scan_id}")
+            logger.info("[SCAN FILE DISCOVERY COMPLETED] scan_id=%s file_count=%d", scan_id, len(file_paths))
 
+            logger.info("[SCAN PIPELINE STARTED] scan_id=%s file_count=%d", scan_id, len(file_paths))
             self._scan_pipeline.run(
                 file_paths,
                 repo_root=workspace.root_path,
                 scan_id=scan_id,
             )
+            logger.info(
+                "[SCAN ENGINE COMPLETED] scan_id=%s elapsed_seconds=%.3f",
+                scan_id,
+                perf_counter() - started,
+            )
         finally:
-            logger.info(f"[SCAN] Cleaning up workspace for scan {scan_id}")
+            logger.info("[SCAN CLEANUP STARTED] scan_id=%s", scan_id)
             try:
                 self._workspace_service.delete(workspace)
+                logger.info("[SCAN CLEANUP COMPLETED] scan_id=%s", scan_id)
             except Exception:
-                logger.warning(
-                    "[SCAN] Failed to clean up workspace for scan %s",
+                logger.exception(
+                    "[SCAN CLEANUP FAILED] scan_id=%s",
                     scan_id,
-                    exc_info=True,
                 )
 
     def _run_tests_with_coverage(self, repo_root: Path) -> None:
@@ -106,19 +122,18 @@ class ScanEngineService:
                 check=False,
             )
         except Exception as exc:
-            logger.warning("[SCAN] Failed to run coverage for %s: %s", repo_root, exc)
+            logger.warning("[SCAN COVERAGE FAILED] repo_root=%s error=%s", repo_root, str(exc))
             return
 
         if result.returncode != 0:
             logger.warning(
-                "[SCAN] Coverage test run failed for %s with exit code %s: %s",
+                "[SCAN COVERAGE COMPLETED WITH FAILURES] repo_root=%s exit_code=%s",
                 repo_root,
                 result.returncode,
-                (result.stderr or result.stdout)[-2000:],
             )
             return
 
-        logger.info("[SCAN] Coverage data written to %s", repo_root / ".coverage")
+        logger.info("[SCAN COVERAGE COMPLETED] repo_root=%s", repo_root)
 
     def _has_tests(self, repo_root: Path) -> bool:
         test_dirs = [repo_root / "tests", repo_root / "test"]

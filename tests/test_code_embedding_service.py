@@ -69,6 +69,45 @@ def test_code_embedding_service_sanitizes_non_finite_model_outputs() -> None:
     assert all(math.isfinite(value) for vector in vectors for value in vector)
 
 
+def test_codesage_pooling_uses_attention_mask_and_model_limit() -> None:
+    service = CodeEmbeddingService(
+        model_id="codesage/codesage-base-v2",
+        max_length=8192,
+    )
+    service._tokenizer = SimpleNamespace(model_max_length=4096)
+    service._model = SimpleNamespace(
+        config=SimpleNamespace(max_position_embeddings=2048),
+    )
+
+    hidden_states = torch.tensor(
+        [
+            [[1.0, 0.0], [0.0, 1.0], [9.0, 9.0]],
+        ]
+    )
+    attention_mask = torch.tensor([[1, 1, 0]])
+    pooled = service._pool_hidden_states(
+        SimpleNamespace(pooler_output=None),
+        hidden_states,
+        {"attention_mask": attention_mask},
+    )
+
+    assert torch.allclose(pooled, torch.tensor([[0.5, 0.5]]))
+    assert service._effective_max_length() == 2048
+
+
+def test_codesage_compatibility_head_mask_fallback() -> None:
+    service = CodeEmbeddingService(model_id="codesage/codesage-base-v2")
+    pretrained_model = type("PreTrainedModel", (), {})
+
+    service._patch_codesage_head_mask(pretrained_model)
+
+    model = SimpleNamespace(dtype=torch.float32)
+    assert pretrained_model.get_head_mask(model, None, 2) == [None, None]
+
+    head_mask = pretrained_model.get_head_mask(model, torch.ones(2), 3)
+    assert head_mask.shape == (3, 1, 2, 1, 1)
+
+
 class FakeTokenizer:
     def __call__(self, batch, **_: object) -> dict[str, torch.Tensor]:
         return {

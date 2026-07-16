@@ -3,6 +3,7 @@ import keyword
 import logging
 import math
 import tokenize
+from time import perf_counter
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -94,16 +95,58 @@ class DuplicationAnalysisLayer:
         }
 
     def run(self, vectors: list[MetricsVector]) -> LayerResult:
-        logger.info("[DUPLICATION] running duplication analysis on %d files", len(vectors))
-        self._validate_vectors(vectors)
+        started = perf_counter()
+        logger.info(
+            "[DUPLICATION STARTED] file_count=%d model=%s syntax_threshold=%.3f semantic_threshold=%.3f min_lines=%d min_tokens=%d",
+            len(vectors),
+            getattr(self.embedding_service, "model_id", self.embedding_service.__class__.__name__),
+            self.syntax_similarity_threshold,
+            self.semantic_similarity_threshold,
+            self.min_block_lines,
+            self.min_block_tokens,
+        )
+        try:
+            self._validate_vectors(vectors)
+        except Exception:
+            logger.exception("[DUPLICATION VALIDATION FAILED] file_count=%d", len(vectors))
+            raise
 
         if not vectors:
             logger.warning("[DUPLICATION] no files to analyze")
+            logger.info(
+                "[DUPLICATION COMPLETED] file_count=0 block_count=0 syntax_match_count=0 semantic_match_count=0 vector_error_count=0 elapsed_seconds=%.3f",
+                perf_counter() - started,
+            )
             return LayerResult(vectors=vectors)
 
+        context_started = perf_counter()
         context = self._build_context(vectors)
+        logger.info(
+            "[DUPLICATION CONTEXT COMPLETED] file_count=%d block_count=%d read_error_count=%d elapsed_seconds=%.3f",
+            len(vectors),
+            len(context.blocks),
+            len(context.read_errors),
+            perf_counter() - context_started,
+        )
+        syntax_started = perf_counter()
         self._find_syntax_duplicates(context)
+        logger.info(
+            "[DUPLICATION SYNTAX COMPLETED] block_count=%d match_block_count=%d match_count=%d elapsed_seconds=%.3f",
+            len(context.blocks),
+            len(context.syntax_matches_by_block),
+            sum(len(matches) for matches in context.syntax_matches_by_block.values()),
+            perf_counter() - syntax_started,
+        )
+        semantic_started = perf_counter()
         self._find_semantic_duplicates(context)
+        logger.info(
+            "[DUPLICATION SEMANTIC COMPLETED] block_count=%d match_block_count=%d match_count=%d failed=%s elapsed_seconds=%.3f",
+            len(context.blocks),
+            len(context.semantic_matches_by_block),
+            sum(len(matches) for matches in context.semantic_matches_by_block.values()),
+            bool(context.semantic_error),
+            perf_counter() - semantic_started,
+        )
 
         for vector in vectors:
             assert vector.absolute_path is not None
@@ -113,6 +156,12 @@ class DuplicationAnalysisLayer:
                     try:
                         vector.metrics[metric_name] = handler(context, path)
                     except Exception as exc:
+                        logger.warning(
+                            "[DUPLICATION METRIC FAILED] file=%s metric=%s error=%s",
+                            vector.relative_path,
+                            metric_name,
+                            str(exc),
+                        )
                         vector.errors.append(f"{metric_name} failed: {exc}")
                         vector.metrics[metric_name] = None
 
@@ -122,14 +171,22 @@ class DuplicationAnalysisLayer:
                 if context.semantic_error and context.blocks_by_path.get(path):
                     vector.errors.append(f"semantic duplication failed: {context.semantic_error}")
             except Exception as exc:
-                logger.warning("[DUPLICATION] failed to build vector for %s: %s", path, exc)
+                logger.warning(
+                    "[DUPLICATION VECTOR FAILED] file=%s error=%s",
+                    vector.relative_path,
+                    str(exc),
+                )
                 vector.metrics = self._safe_default_metrics()
                 vector.errors.append(f"duplication metrics failed: {exc}")
 
         logger.info(
-            "[DUPLICATION] completed duplication analysis on %d files with %d blocks",
+            "[DUPLICATION COMPLETED] file_count=%d block_count=%d syntax_match_count=%d semantic_match_count=%d vector_error_count=%d elapsed_seconds=%.3f",
             len(vectors),
             len(context.blocks),
+            sum(len(matches) for matches in context.syntax_matches_by_block.values()),
+            sum(len(matches) for matches in context.semantic_matches_by_block.values()),
+            sum(len(vector.errors) for vector in vectors),
+            perf_counter() - started,
         )
         return LayerResult(vectors=vectors)
 
@@ -153,7 +210,11 @@ class DuplicationAnalysisLayer:
                 context.blocks_by_path[path] = blocks
                 context.blocks.extend(blocks)
             except Exception as exc:
-                logger.warning("[DUPLICATION] failed to extract blocks from %s: %s", path, exc)
+                logger.warning(
+                    "[DUPLICATION SOURCE FAILED] file=%s error=%s",
+                    context.relative_path_by_absolute_path.get(path, path.name),
+                    str(exc),
+                )
                 context.blocks_by_path[path] = []
                 context.read_errors[path] = str(exc)
 
@@ -284,7 +345,7 @@ class DuplicationAnalysisLayer:
                     f"embedding service returned {len(embeddings)} vectors for {len(context.blocks)} blocks"
                 )
         except Exception as exc:
-            logger.warning("[DUPLICATION] semantic duplication analysis failed: %s", exc)
+            logger.warning("[DUPLICATION SEMANTIC FAILED] error=%s", str(exc))
             context.semantic_error = str(exc)
             context.semantic_matches_by_block = {}
             return

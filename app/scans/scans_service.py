@@ -116,6 +116,58 @@ class ScanService:
             raise EntityNotFoundError("scan", scan_id) from exc
         except DatabaseOperationException as exc:
             raise PersistenceError("Unable to update scan status") from exc
+
+    def transition_scan_status(
+        self,
+        scan_id: uuid.UUID,
+        status: ScanStatus,
+        *,
+        expected_statuses: set[ScanStatus],
+        error_message: str | None = None,
+    ) -> bool:
+        logger.debug(
+            "Transitioning scan status scan_id=%s requested_status=%s expected_statuses=%s",
+            scan_id,
+            status.value,
+            sorted(item.value for item in expected_statuses),
+        )
+        try:
+            return self.scan_repository.transition_scan_status(
+                scan_id,
+                status,
+                expected_statuses=expected_statuses,
+                error_message=error_message,
+            )
+        except RecordNotFoundException as exc:
+            logger.warning("Cannot transition missing scan scan_id=%s", scan_id)
+            raise EntityNotFoundError("scan", scan_id) from exc
+        except DatabaseOperationException as exc:
+            raise PersistenceError("Unable to transition scan status") from exc
+
+    def request_scan_cancellations(self, scan_ids: list[uuid.UUID]) -> dict[uuid.UUID, bool]:
+        outcomes: dict[uuid.UUID, bool] = {}
+        for scan_id in scan_ids:
+            try:
+                outcomes[scan_id] = self.scan_queue_service.request_scan_cancellation(scan_id)
+            except Exception:
+                # Cancellation is intentionally best-effort during project
+                # deletion; one broker failure must not prevent other scans
+                # from being revoked or the deletion from continuing.
+                logger.exception("Unexpected scan cancellation failure scan_id=%s", scan_id)
+                outcomes[scan_id] = False
+        logger.info(
+            "Requested scan cancellation count=%d failed_count=%d",
+            len(scan_ids),
+            sum(not outcome for outcome in outcomes.values()),
+        )
+        return outcomes
+
+    def forget_scan_results(self, scan_ids: list[uuid.UUID]) -> None:
+        for scan_id in scan_ids:
+            try:
+                self.scan_queue_service.forget_scan_result(scan_id)
+            except Exception:
+                logger.exception("Unexpected scan result cleanup failure scan_id=%s", scan_id)
     
     def get_scan_by_id(self, scan_id: uuid.UUID) -> ScanResponse:
         try: 

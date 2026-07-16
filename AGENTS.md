@@ -107,6 +107,9 @@ logger = logging.getLogger(__name__)
 - Include safe correlation context such as user, project, scan, task, and file identifiers plus counts and durations. Never log credentials, tokens, cookies, source contents, prompts containing sensitive code, or complete request/response payloads.
 - Keep messages action-oriented and specific about what is happening. Avoid vague messages such as `request failed`, excessive per-row logging, or logs that only repeat the HTTP middleware access line.
 - Logging must preserve the layer boundaries and exception vocabulary described above; it does not replace domain errors, repository errors, or centralized HTTP exception handling.
+- For every multi-step action, log the complete lifecycle: start, authorization/validation decisions, each state transition, each external or downstream call, persistence, cleanup, no-op/skipped work, whether a best-effort failure is ignored or aborts the action, and completion with counts and elapsed time where useful.
+- Carry the same safe correlation identifiers through all layers (user, project, scan, task, file, and operation identifiers) so a single action can be reconstructed from logs without relying on middleware access lines.
+- Never log source contents, prompts, embeddings, captured test output, credentials, access tokens, cookies, or complete request/response payloads; use counts, names, statuses, and bounded safe identifiers instead.
 
 ## Naming rules
 

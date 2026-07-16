@@ -203,7 +203,12 @@ json_payload_type = JSONB().with_variant(JSON(), "sqlite")
 class ScanVisualizationRecord(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "scan_visualization_records"
 
-    scan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    scan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("scans.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     layer: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     file_path: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     metrics: Mapped[dict] = mapped_column(json_payload_type, nullable=False, default=dict)

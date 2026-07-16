@@ -106,7 +106,9 @@ class ScanRepository:
         error_message: str | None = None,
     ) -> ScanResponse:
         try:
-            scan = self._db.get(Scan, scan_id)
+            scan = self._db.execute(
+                select(Scan).where(Scan.id == scan_id).with_for_update()
+            ).scalar_one_or_none()
             if scan is None:
                 raise RecordNotFoundException(
                     "Scan not found",
@@ -134,6 +136,71 @@ class ScanRepository:
             self._db.rollback()
             raise DatabaseOperationException(
                 "Failed to update scan status",
+                details={"scan_id": str(scan_id), "status": status.value},
+            ) from exc
+
+    def transition_scan_status(
+        self,
+        scan_id: uuid.UUID,
+        status: ScanStatus,
+        *,
+        expected_statuses: set[ScanStatus],
+        error_message: str | None = None,
+    ) -> bool:
+        """Apply a terminal/running transition only from allowed states."""
+        try:
+            # Serialize worker lifecycle hooks and project deletion. The
+            # deletion path locks the same scan rows before revoking tasks;
+            # this lock prevents a late success/failure hook from overwriting
+            # a cancellation or from racing the cascade delete.
+            scan = self._db.execute(
+                select(Scan).where(Scan.id == scan_id).with_for_update()
+            ).scalar_one_or_none()
+            if scan is None:
+                raise RecordNotFoundException(
+                    "Scan not found",
+                    details={"scan_id": str(scan_id)},
+                )
+
+            current_status = scan.status if isinstance(scan.status, ScanStatus) else ScanStatus(scan.status)
+            if current_status not in expected_statuses:
+                logger.info(
+                    "Skipped scan status transition scan_id=%s current_status=%s requested_status=%s",
+                    scan_id,
+                    current_status.value,
+                    status.value,
+                )
+                return False
+
+            now = datetime.now(timezone.utc)
+            scan.status = status
+            scan.error_message = error_message if status == ScanStatus.FAILED else None
+            if status == ScanStatus.RUNNING:
+                scan.started_at = scan.started_at or now
+                scan.finished_at = None
+            elif status in {ScanStatus.SUCCEEDED, ScanStatus.FAILED, ScanStatus.CANCELLED}:
+                scan.finished_at = now
+
+            self._db.commit()
+            self._db.refresh(scan)
+            logger.info(
+                "Updated scan status scan_id=%s from=%s to=%s",
+                scan_id,
+                current_status.value,
+                status.value,
+            )
+            return True
+        except RecordNotFoundException:
+            raise
+        except (SQLAlchemyError, ValueError) as exc:
+            self._db.rollback()
+            logger.exception(
+                "Failed conditional scan status transition scan_id=%s status=%s",
+                scan_id,
+                status.value,
+            )
+            raise DatabaseOperationException(
+                "Failed to transition scan status",
                 details={"scan_id": str(scan_id), "status": status.value},
             ) from exc
 

@@ -27,12 +27,14 @@ celery.conf.update(
 
     task_track_started=True,
 
-    task_acks_late=True,
-
-    task_reject_on_worker_lost=True,
+    # Scan tasks are deliberately at-most-once. A failed task must be
+    # acknowledged and never re-delivered after a worker process is lost.
+    task_acks_late=False,
+    task_reject_on_worker_lost=False,
     worker_send_task_events = True,
 
     worker_prefetch_multiplier=1,
+    worker_disable_prefetch=True,
 
     task_serializer="json",
     accept_content=["json"],

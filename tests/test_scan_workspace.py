@@ -20,7 +20,7 @@ class ScanWorkspaceServiceTests(unittest.TestCase):
             self.assertEqual(workspace.root_path, Path(temp_dir) / str(scan_id))
             self.assertTrue(workspace.root_path.exists())
 
-    def test_delete_by_scan_id_removes_stale_workspace_for_retry(self) -> None:
+    def test_delete_by_scan_id_removes_stale_workspace_before_execution(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = ScanWorkspaceService(temp_dir)
             scan_id = uuid4()

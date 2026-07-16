@@ -44,7 +44,12 @@ async def domain_exception_handler(request: Request, exc: DomainException) -> JS
     error_code = "INTERNAL_ERROR"
     message = "An internal server error occurred"
     details = None
-    print(f"Handling DomainException: {exc}")
+    logger.warning(
+        "Handling domain exception method=%s path=%s exception=%s",
+        request.method,
+        request.url.path,
+        exc.__class__.__name__,
+    )
     for exception_type, mapping in EXCEPTION_MAPPINGS:
         if isinstance(exc, exception_type):
             status_code, error_code = mapping

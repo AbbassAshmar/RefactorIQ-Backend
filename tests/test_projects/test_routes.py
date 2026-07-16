@@ -83,3 +83,50 @@ def test_create_and_list_projects_authenticated(client: TestClient):
     app.dependency_overrides.pop(get_current_payload, None)
     app.dependency_overrides.pop(get_user_service, None)
     app.dependency_overrides.pop(get_project_service, None)
+
+
+def test_client_can_delete_owned_project(client: TestClient):
+    user_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    user_service = MagicMock()
+    user_service.get_user.return_value = MagicMock()
+    project_service = MagicMock()
+
+    client.app.dependency_overrides[get_current_payload] = lambda: TokenPayload(
+        sub=str(user_id), role="client"
+    )
+    client.app.dependency_overrides[get_user_service] = lambda: user_service
+    client.app.dependency_overrides[get_project_service] = lambda: project_service
+
+    response = client.delete(f"/api/v1/projects/{project_id}")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["project_id"] == str(project_id)
+    project_service.delete_project.assert_called_once_with(project_id, user_id)
+
+    client.app.dependency_overrides.pop(get_current_payload, None)
+    client.app.dependency_overrides.pop(get_user_service, None)
+    client.app.dependency_overrides.pop(get_project_service, None)
+
+
+def test_admin_cannot_delete_projects(client: TestClient):
+    user_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    user_service = MagicMock()
+    project_service = MagicMock()
+
+    client.app.dependency_overrides[get_current_payload] = lambda: TokenPayload(
+        sub=str(user_id), role="admin"
+    )
+    client.app.dependency_overrides[get_user_service] = lambda: user_service
+    client.app.dependency_overrides[get_project_service] = lambda: project_service
+
+    response = client.delete(f"/api/v1/projects/{project_id}")
+
+    assert response.status_code == 403
+    project_service.delete_project.assert_not_called()
+    user_service.get_user.assert_not_called()
+
+    client.app.dependency_overrides.pop(get_current_payload, None)
+    client.app.dependency_overrides.pop(get_user_service, None)
+    client.app.dependency_overrides.pop(get_project_service, None)

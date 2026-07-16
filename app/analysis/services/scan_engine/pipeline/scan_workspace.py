@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 import shutil
+from time import perf_counter
 
 from app.analysis.services.scan_engine.pipeline.metrics_vector import validate_relative_path
 
@@ -77,14 +78,29 @@ class ScanWorkspaceService:
 
     def create(self, scan_id: UUID) -> ScanWorkspace:
         path = self.path_for(scan_id)
+        logger.info("[WORKSPACE CREATE STARTED] scan_id=%s path=%s", scan_id, path)
         path.mkdir(parents=True, exist_ok=False)
+        logger.info("[WORKSPACE CREATED] scan_id=%s path=%s", scan_id, path)
         return ScanWorkspace(scan_id=scan_id, root_path=path)
 
     def delete(self, workspace: ScanWorkspace) -> None:
-        if workspace.root_path.exists():
-            shutil.rmtree(workspace.root_path)
+        self.delete_by_scan_id(workspace.scan_id)
 
     def delete_by_scan_id(self, scan_id: UUID) -> None:
         path = self.path_for(scan_id)
-        if path.exists():
+        started = perf_counter()
+        if not path.exists():
+            logger.debug("[WORKSPACE DELETE ABSENT] scan_id=%s path=%s", scan_id, path)
+            return
+        logger.info("[WORKSPACE DELETE STARTED] scan_id=%s path=%s", scan_id, path)
+        try:
             shutil.rmtree(path)
+        except FileNotFoundError:
+            logger.debug("[WORKSPACE DELETE RACE] scan_id=%s path=%s", scan_id, path)
+            return
+        logger.info(
+            "[WORKSPACE DELETED] scan_id=%s path=%s elapsed_seconds=%.3f",
+            scan_id,
+            path,
+            perf_counter() - started,
+        )
