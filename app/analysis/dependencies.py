@@ -63,7 +63,10 @@ def build_code_embedding_service() -> CodeEmbeddingService:
     )
 
 def get_duplication_analysis_layer() -> DuplicationAnalysisLayer:
-    return DuplicationAnalysisLayer(embedding_service=build_code_embedding_service())
+    return DuplicationAnalysisLayer(
+        embedding_service=build_code_embedding_service(),
+        semantic_similarity_threshold=settings.SEMANTIC_DUPLICATION_SIMILARITY_THRESHOLD,
+    )
 
 def get_architecture_analysis_layer() -> ArchitectureAnalysisLayer:
     return ArchitectureAnalysisLayer()
@@ -115,7 +118,10 @@ def build_scan_pipeline(
 ) -> ScanPipeline:
     static_layer = StaticAnalysisLayer()
     history_layer = HistoryAnalysisLayer()
-    duplication_layer = DuplicationAnalysisLayer(embedding_service=build_code_embedding_service())
+    duplication_layer = DuplicationAnalysisLayer(
+        embedding_service=build_code_embedding_service(),
+        semantic_similarity_threshold=settings.SEMANTIC_DUPLICATION_SIMILARITY_THRESHOLD,
+    )
     architectural_layer = ArchitectureAnalysisLayer()
     decision_layer = DecisionAnalysisLayer()
 

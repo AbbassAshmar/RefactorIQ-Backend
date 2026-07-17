@@ -1,0 +1,93 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  fastapi:
+    image: ghcr.io/abbassashmar/refactoriq-backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "8000"
+
+  celery_worker:
+    image: ghcr.io/abbassashmar/refactoriq-backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command:
+      - celery
+      - -A
+      - app.core.celery_app.celery
+      - worker
+      - --loglevel=info
+      - -Q
+      - default,scans
+      - --concurrency=1
+      - --disable-prefetch
+      - -E
+    env_file:
+      - .env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: ghcr.io/abbassashmar/refactoriq-frontend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      - fastapi
+    ports:
+      - "80:80"
+      # Add HTTPS through a reverse proxy before production use.
+
+  kanchi:
+    image: getkanchi/kanchi:latest
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - kanchi-data:/data
+    # Publish these only if they genuinely need direct public access.
+    ports:
+      - "3000:3000"
+      - "8765:8765"
+
+volumes:
+  postgres-data:
+  redis-data:
+  kanchi-data:

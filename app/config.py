@@ -62,13 +62,14 @@ class Settings(BaseSettings):
     SCAN_REPO_BASE_DIR: Path
 
     # Code embeddings
-    CODE_EMBEDDING_MODEL_ID: str = "Salesforce/SFR-Embedding-Code-400M_R"
+    CODE_EMBEDDING_MODEL_ID: str = "jinaai/jina-embeddings-v2-base-code"
     CODE_EMBEDDING_MODEL_PATH: Path | None = None
     CODE_EMBEDDING_LOCAL_FILES_ONLY: bool = False
     CODE_EMBEDDING_BATCH_SIZE: int = 8
     CODE_EMBEDDING_DEVICE: str | None = None
-    CODE_EMBEDDING_MAX_LENGTH: int = 8192
+    CODE_EMBEDDING_MAX_LENGTH: int = 1024
     CODE_EMBEDDING_TRUST_REMOTE_CODE: bool = True
+    SEMANTIC_DUPLICATION_SIMILARITY_THRESHOLD: float = 0.48
 
     # LLM provider
     GEMINI_API_KEY: str | None = None
@@ -96,5 +97,15 @@ class Settings(BaseSettings):
         if not path.is_absolute():
             path = BASE_DIR / path
         return path.resolve()
+
+    @field_validator("SEMANTIC_DUPLICATION_SIMILARITY_THRESHOLD")
+    @classmethod
+    def validate_semantic_duplication_similarity_threshold(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(
+                "SEMANTIC_DUPLICATION_SIMILARITY_THRESHOLD must be between 0 and 1"
+            )
+        return v
+
 
 settings = Settings()

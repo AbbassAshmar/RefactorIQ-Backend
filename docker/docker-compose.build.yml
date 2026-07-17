@@ -1,0 +1,12 @@
+services:
+  backend_image:
+    image: ghcr.io/abbassashmar/refactoriq-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+
+  frontend_image:
+    image: ghcr.io/abbassashmar/refactoriq-frontend:${IMAGE_TAG:-latest}
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
