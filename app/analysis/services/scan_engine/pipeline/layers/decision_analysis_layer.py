@@ -29,7 +29,7 @@ class DecisionAnalysisLayer:
     """Layer 5 - per-file refactor priority scoring."""
 
     LAYER_NAME = "decision_analysis"
-    SCORING_MODEL_VERSION = 3
+    SCORING_MODEL_VERSION = 4
     COUNT_DENSITY_REFERENCE_LOC = 500.0
     SIZE_SATURATION_LOC = 300.0
     DUPLICATION_MATERIALITY_LOC = 30.0
@@ -37,6 +37,7 @@ class DecisionAnalysisLayer:
     CIRCULAR_DEPENDENCY_SATURATION = 2.0
     DOMINANT_SIGNAL_WEIGHT = 0.65
     MIN_COMPONENT_METRIC_COVERAGE = 0.50
+    CRITICAL_PRIORITY_THRESHOLD = 0.70
     HIGH_PRIORITY_THRESHOLD = 0.55
     MEDIUM_PRIORITY_THRESHOLD = 0.31
     EXPECTED_INPUT_LAYERS = {
@@ -536,8 +537,15 @@ class DecisionAnalysisLayer:
                 else None
             ),
             "max_refactor_score": self._round_score(max(scores)) if scores else None,
+            "critical_priority_files_count": sum(
+                1 for score in scores if score >= self.CRITICAL_PRIORITY_THRESHOLD
+            ),
             "high_priority_files_count": sum(
-                1 for score in scores if score >= self.HIGH_PRIORITY_THRESHOLD
+                1
+                for score in scores
+                if self.HIGH_PRIORITY_THRESHOLD
+                <= score
+                < self.CRITICAL_PRIORITY_THRESHOLD
             ),
             "medium_priority_files_count": sum(
                 1
@@ -558,6 +566,7 @@ class DecisionAnalysisLayer:
             ],
             "score_range": {"min": 0.0, "max": 1.0},
             "priority_thresholds": {
+                "critical": self.CRITICAL_PRIORITY_THRESHOLD,
                 "high": self.HIGH_PRIORITY_THRESHOLD,
                 "medium": self.MEDIUM_PRIORITY_THRESHOLD,
             },
@@ -807,6 +816,8 @@ class DecisionAnalysisLayer:
     def _priority_band(self, score: float | None) -> str | None:
         if score is None:
             return None
+        if score >= self.CRITICAL_PRIORITY_THRESHOLD:
+            return "critical"
         if score >= self.HIGH_PRIORITY_THRESHOLD:
             return "high"
         if score >= self.MEDIUM_PRIORITY_THRESHOLD:

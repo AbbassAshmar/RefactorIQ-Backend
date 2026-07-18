@@ -175,9 +175,10 @@ def test_decision_layer_scores_files_between_zero_and_one_and_ranks_pressure() -
     assert 0.0 <= calm_score <= 1.0
     assert 0.0 <= hot_score <= 1.0
     assert hot_score > calm_score
-    assert by_file["src/hot.py"].metadata["priority_band"] == "high"
+    assert by_file["src/hot.py"].metadata["priority_band"] == "critical"
 
     assert summary.metrics["files_scored_count"] == 2
+    assert summary.metrics["critical_priority_files_count"] == 1
     assert summary.metrics["max_refactor_score"] == hot_score
     assert summary.metadata["top_refactor_candidates"][0]["file_path"] == "src/hot.py"
 
@@ -308,7 +309,7 @@ def test_duplication_materiality_prevents_tiny_clone_counts_from_dominating() ->
         large_file.metrics["complexity_score"] - small_file.metrics["complexity_score"]
     ) == pytest.approx(0.12)
     assert small_file.metadata["count_density_reference_loc"] == 500.0
-    assert small_file.metadata["scoring_model_version"] == 3
+    assert small_file.metadata["scoring_model_version"] == 4
 
 
 def test_architecture_score_omits_deterministic_dependency_total() -> None:
@@ -522,15 +523,22 @@ def test_priority_threshold_constants_drive_bands_and_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     layer = DecisionAnalysisLayer()
-    monkeypatch.setattr(layer, "HIGH_PRIORITY_THRESHOLD", 0.8)
+    monkeypatch.setattr(layer, "CRITICAL_PRIORITY_THRESHOLD", 0.8)
+    monkeypatch.setattr(layer, "HIGH_PRIORITY_THRESHOLD", 0.5)
     monkeypatch.setattr(layer, "MEDIUM_PRIORITY_THRESHOLD", 0.3)
     decision_result = LayerResult(
         vectors=[
             MetricsVector(
                 layer=layer.LAYER_NAME,
+                absolute_path=Path("/workspace/src/critical.py"),
+                relative_path="src/critical.py",
+                metrics={"refactor_score": 0.8},
+            ),
+            MetricsVector(
+                layer=layer.LAYER_NAME,
                 absolute_path=Path("/workspace/src/high.py"),
                 relative_path="src/high.py",
-                metrics={"refactor_score": 0.8},
+                metrics={"refactor_score": 0.5},
             ),
             MetricsVector(
                 layer=layer.LAYER_NAME,
@@ -549,9 +557,25 @@ def test_priority_threshold_constants_drive_bands_and_summary(
 
     summary = layer.summarize(decision_result)[0]
 
-    assert layer._priority_band(0.8) == "high"
+    assert layer._priority_band(0.8) == "critical"
+    assert layer._priority_band(0.5) == "high"
     assert layer._priority_band(0.3) == "medium"
     assert layer._priority_band(0.29) == "low"
+    assert summary.metrics["critical_priority_files_count"] == 1
     assert summary.metrics["high_priority_files_count"] == 1
     assert summary.metrics["medium_priority_files_count"] == 1
-    assert summary.metadata["priority_thresholds"] == {"high": 0.8, "medium": 0.3}
+    assert summary.metrics["low_priority_files_count"] == 1
+    assert sum(
+        summary.metrics[key]
+        for key in (
+            "critical_priority_files_count",
+            "high_priority_files_count",
+            "medium_priority_files_count",
+            "low_priority_files_count",
+        )
+    ) == summary.metrics["files_scored_count"]
+    assert summary.metadata["priority_thresholds"] == {
+        "critical": 0.8,
+        "high": 0.5,
+        "medium": 0.3,
+    }
