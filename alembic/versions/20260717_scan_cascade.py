@@ -1,6 +1,6 @@
 """Cascade scan visualization records with their scan.
 
-Revision ID: 20260717_scan_visualization_cascade
+Revision ID: 20260717_scan_cascade
 Revises: 20260714_refactor_queue
 Create Date: 2026-07-17
 """
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "20260717_scan_visualization_cascade"
+revision = "20260717_scan_cascade"
 down_revision = "20260714_refactor_queue"
 branch_labels = None
 depends_on = None
